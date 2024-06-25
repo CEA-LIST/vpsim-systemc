@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(systemc-download NONE)
+include(ExternalProject)
+ExternalProject_Add(systemc
+    URL https://www.accellera.org/images/downloads/standards/systemc/systemc-2.3.2.tar.gz
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/systemc"
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    TEST_COMMAND ""
+)

@@ -1,0 +1,14 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(elfio-download NONE)
+
+include(ExternalProject)
+ExternalProject_Add(elfio
+    GIT_REPOSITORY https://github.com/serge1/ELFIO.git
+    GIT_TAG Release_3.5
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/extern/elfio"
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    TEST_COMMAND ""
+)
