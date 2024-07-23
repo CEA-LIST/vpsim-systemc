@@ -533,9 +533,9 @@ public:
 	}
 
 	virtual void finalize() override {
-		VpsimIp* ip = VpsimIp::Find("B0");//VpsimIp* ip = VpsimIp::Find(getAttr("B"));
-		DynamicSystemCCosimulator* B=dynamic_cast<DynamicSystemCCosimulator*>(ip);// B as obfuscated in main.ccp and vpsim_susytem.cpp
-       	B->mModulePtr->setIOAccessPtr(mModulePtr);
+		VpsimIp* ip = VpsimIp::Find("SystemCCosim0");
+		DynamicSystemCCosimulator* cosim=dynamic_cast<DynamicSystemCCosimulator*>(ip);
+		cosim->mModulePtr->setIOAccessPtr(mModulePtr);
 
 	}
 
