@@ -182,8 +182,8 @@ namespace vpsim {
     inline sc_time getTotalLatencyWithContention  () {
       //latency of the packets arriving during CONTENTION INTERVAL I is computed at CONTENTION INTERVAL I+1. 
       //So, packets arriving during the last CONTENTION INTERVAL need to be handled seperately*/
-      AverageLatency+=ComputePacketLatency();
-      PacketsCount+=packetBuffer.size();
+      //AverageLatency+=ComputePacketLatency();
+      //PacketsCount+=packetBuffer.size();
       return (AverageLatency);
     }
 
