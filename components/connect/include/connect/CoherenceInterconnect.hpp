@@ -138,7 +138,7 @@ namespace vpsim {
     sc_time interval_end=sc_time(0, SC_NS);
     sc_time AverageLatency=sc_time(0, SC_NS);
 
-    uint64_t nb_packets=0; // counter of the number of packets in a Contention_Interval
+    uint64_t totalFlits=0; // counter of the number of flits in the current Contention_Interval
     sc_time packet_latency; // total latency of a packet = router_crossing_latency + contention_latency
     sc_time AverageContentionDelay=sc_time(0, SC_NS);
     sc_time MaxLatency=sc_time(0, SC_NS);
@@ -262,14 +262,14 @@ namespace vpsim {
     void set_contention_interval (double contention_interval);
     void set_buffer_size (uint32_t buffer_size);
     void set_virtual_channels (uint32_t virtual_channels);
-    void SavePacket(idx_t id, route path);
+    void SavePacket(idx_t id, route path, uint32_t nbFlits=1);
     void Create_Noc(idx_t noc_x, idx_t noc_y);
-    route ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id);
+    route ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id, uint32_t nbFlits=1);
     sc_time QueueWaitingTime(sc_time wait, sc_time router_latency, sc_time link_latency, sc_time time_interval, uint64_t queue_nbr_packets);
     sc_time PacketLatency(sc_time total_wait, sc_time router_latency, sc_time link_latency, uint64_t nbr_hops);
     sc_time ComputePacketLatency();
     vector <tuple<idx_t,idx_t>> GetDestinations(tlm::tlm_generic_payload& trans, bool isHome, bool isIdMapped, set<idx_t> dst_ids);
-    void NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval,bool isHome, bool isIdMapped, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device = false);
+    void NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval,bool isHome, bool isIdMapped, uint32_t nbFlits, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device = false);
 
     void PrintPath(route path);
     void PrintPacketBuffer();

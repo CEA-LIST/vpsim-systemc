@@ -452,9 +452,9 @@ namespace vpsim {
     mBufferSize=buffer_size;
   }
 
-  void CoherenceInterconnect::SavePacket(idx_t id, route path){
+  void CoherenceInterconnect::SavePacket(idx_t id, route path, uint32_t nbFlits){
     sc_time t0=sc_time(0, SC_NS);
-    packetBuffer.push_back(make_tuple(id,path,t0));
+    for(uint32_t count=0;count<nbFlits;++count) packetBuffer.push_back(make_tuple(id+count,path,t0));
   }
 
   void CoherenceInterconnect::Create_Noc(idx_t noc_x, idx_t noc_y){
@@ -467,7 +467,7 @@ namespace vpsim {
     }
   }
 
-  CoherenceInterconnect::route CoherenceInterconnect::ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id)
+  CoherenceInterconnect::route CoherenceInterconnect::ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id, uint32_t nbFlits)
   {
     idx_t i=0;
     idx_t j=0;
@@ -475,22 +475,22 @@ namespace vpsim {
     route path;
     if((dst_x==src_x)&&(dst_y==src_y)){ // the destination router is the source router
         path.push_back(make_tuple(dst_x,dst_y,'L')); // the output port of the traversed router and its position are added to the packet's path
-        ((noc[make_tuple(dst_x,dst_y)])['L']).insert(make_pair(id,t0)); // update the router's outputBuffer with the arriving packet's id
-        ++RouterPacketsCount[dst_x+(dst_y*mX)];
+        for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(dst_x,dst_y)])['L']).insert(make_pair(id+count,t0)); // update the router's outputBuffer with the arriving packet's id
+        RouterPacketsCount[dst_x+(dst_y*mX)]+=nbFlits;
     }
     else{
         if(dst_x<src_x){
         for(i=src_x;i>dst_x;i--){
             path.push_back(make_tuple(i,src_y,'W'));
-            ((noc[make_tuple(i,src_y)])['W']).insert(make_pair(id,t0));
-            ++RouterPacketsCount[i+(src_y*mX)];
+            for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(i,src_y)])['W']).insert(make_pair(id+count,t0));
+            RouterPacketsCount[i+(src_y*mX)]+=nbFlits;
             }
         }
         else if(dst_x>src_x){
             for(i=src_x;i<dst_x;i++){
                 path.push_back(make_tuple(i,src_y,'E'));
-                ((noc[make_tuple(i,src_y)])['E']).insert(make_pair(id,t0));
-                ++RouterPacketsCount[i+(src_y*mX)];
+                for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(i,src_y)])['E']).insert(make_pair(id+count,t0));
+                RouterPacketsCount[i+(src_y*mX)]+=nbFlits;
             }
         }
         if(dst_y<src_y){
@@ -499,8 +499,8 @@ namespace vpsim {
             }
             for(j=src_y;j>dst_y;j--){
                 path.push_back(make_tuple(i,j,'N'));
-                ((noc[make_tuple(i,j)])['N']).insert(make_pair(id,t0));
-                ++RouterPacketsCount[i+(j*mX)];
+                for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(i,j)])['N']).insert(make_pair(id+count,t0));
+                RouterPacketsCount[i+(j*mX)]+=nbFlits;
             }
         }
         if(dst_y>src_y){
@@ -509,14 +509,14 @@ namespace vpsim {
             }
             for(j=src_y;j<dst_y;j++){
                 path.push_back(make_tuple(i,j,'S'));
-                ((noc[make_tuple(i,j)])['S']).insert(make_pair(id,t0));
-                ++RouterPacketsCount[i+(j*mX)];
+                for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(i,j)])['S']).insert(make_pair(id+count,t0));
+                RouterPacketsCount[i+(j*mX)]+=nbFlits;
             }
         }
         //Don't forget to update the destination router's local outputBuffer
         path.push_back(make_tuple(dst_x,dst_y,'L'));
-        ((noc[make_tuple(dst_x,dst_y)])['L']).insert(make_pair(id,t0));
-        ++RouterPacketsCount[dst_x+(dst_y*mX)];
+        for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(dst_x,dst_y)])['L']).insert(make_pair(id+count,t0));
+        RouterPacketsCount[dst_x+(dst_y*mX)]+=nbFlits;
         }
     return path;
   }
@@ -728,7 +728,7 @@ namespace vpsim {
     }
   }
 
-  void CoherenceInterconnect::NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval, bool isHome, bool isIdMapped, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device){
+  void CoherenceInterconnect::NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval, bool isHome, bool isIdMapped, uint32_t nbFlits, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device){
     route path;
     vector <tuple<idx_t,idx_t>> dest;
     if(device && trans.get_command()==tlm::TLM_READ_COMMAND){ //Reverse direction: memory -> device
@@ -745,23 +745,23 @@ namespace vpsim {
     }
     int64_t ns_per_sec=1000000000;
     sc_time ts=sc_time((trans_time_stamp.to_seconds())*ns_per_sec, SC_NS);
-    if(nb_packets==0){  //This packet is the first to arrive to the Network
+    if(totalFlits==0){  //This packet is the first to arrive to the Network during the current time interval
       interval_start=ts;
       interval_end=interval_start + time_interval;
       for (const auto& dst : dest){
-        nb_packets++;
-        path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst),nb_packets);
-        TotalDistance+=path.size();
-        SavePacket(nb_packets, path);
+        path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst),totalFlits+1,nbFlits);
+        TotalDistance+=nbFlits*path.size();
+        SavePacket(totalFlits+1,path,nbFlits);
+        totalFlits+=nbFlits;
       }
     }
-    else if(nb_packets>0){ //PacketBuffer is not empty
+    else if(totalFlits>0){ //PacketBuffer is not empty
       if((ts>=interval_start)&&(ts<=interval_end)){ //packet arrived during time interval
         for (const auto& dst : dest){
-          nb_packets++;
-          path=ComputeRouteAndUpdateRouters(src_x,src_y, get<0>(dst), get<1>(dst), nb_packets);
-          TotalDistance+=path.size();
-          SavePacket(nb_packets, path);
+          path=ComputeRouteAndUpdateRouters(src_x,src_y, get<0>(dst), get<1>(dst), totalFlits+1, nbFlits);
+          TotalDistance+=nbFlits*path.size();
+          SavePacket(totalFlits+1,path,nbFlits);
+          totalFlits+=nbFlits;
         }
       }
       else if((ts>interval_end)||(ts <interval_start)){ //A new interval of duration time_interval starts (the second part of the condition is a makeshift solution to deal with the timestamps that go back in time)
@@ -770,14 +770,14 @@ namespace vpsim {
         PacketsCount+=packetBuffer.size();
         packetBuffer.clear();
         noc.clear();
-        nb_packets=0;
+        totalFlits=0;
         interval_start=ts; //Start a new time interval
         interval_end=interval_start + time_interval;
         for (const auto& dst : dest){
-          nb_packets++;
-          path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst), nb_packets);
-          TotalDistance+=path.size();
-          SavePacket(nb_packets, path);
+          path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst), totalFlits+1, nbFlits);
+          TotalDistance+=nbFlits*path.size();
+          SavePacket(totalFlits+1,path,nbFlits);
+          totalFlits+=nbFlits;
         }
       }
     }
@@ -790,6 +790,7 @@ namespace vpsim {
     CoherencePayloadExtension* ext;
     trans.get_extension<CoherencePayloadExtension>(ext);
     assert (ext); //Transactions initiated by caches have ncecessarily extensions
+    uint32_t nbFlits=1; // We need to be more specific and retrieve the right number from datasheet
     bool isIdMapped; //False if initiator is memory-mapped or home cache
     SourceCpuExtension* src;
     trans.get_extension<SourceCpuExtension>(src);
@@ -816,6 +817,8 @@ namespace vpsim {
     if (!mIsMesh) {
       if (isDownstream) delay += ACCESS_LATENCY;
     } else  { // Mesh NoC model for NoC latency computation
+      if (trans.get_command()==tlm::TLM_WRITE_COMMAND || ext->getCoherenceCommand()==PutS || ext->getCoherenceCommand()==PutM) //Transactions transporting data
+        nbFlits=trans.get_data_length()/FlitSize; //Again, we need to be more specific and retrieve the right number from datasheet
       if(mWithContention==0){ // NoC performance model without contention
         uint64_t dist = computeNoCLatency (ext->getToHome(), isIdMapped, trans.get_address(), ext->getInitiatorId(), ext->getTargetIds());
         sc_time latency = mRouterLatency*dist;
@@ -831,7 +834,7 @@ namespace vpsim {
       else{ // NoC performance model with contention
         sc_time ts = src->time_stamp + delay;
         mesh_pos src_pos = get_noc_pos_by_id(ext->getInitiatorId());
-        NetworkTimingModel(trans,ts,mContentionInterval,ext->getToHome(),isIdMapped,src_pos.x_id,src_pos.y_id,ext->getTargetIds());
+        NetworkTimingModel(trans,ts,mContentionInterval,ext->getToHome(),isIdMapped,nbFlits,src_pos.x_id,src_pos.y_id,ext->getTargetIds());
 	      if (isDownstream) delay+=packet_latency;
       }
     }
@@ -925,7 +928,7 @@ namespace vpsim {
             //Compute latency delay
             sc_time ts = src->time_stamp + arrivalDelay;
 
-            NetworkTimingModel(trans,ts,mContentionInterval,false,false, src_x, src_y, set<idx_t>(), true);//Reverse direction
+            NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_x,src_y,set<idx_t>(),true);//Reverse direction
             tmpDelay = memDelay + packet_latency; //Packet or flit latency
             if(tmpDelay>maxDelay) maxDelay=tmpDelay;  //Find a better way than to compare every time
           }
@@ -956,7 +959,7 @@ namespace vpsim {
 
           //Compute latency delay
           sc_time ts = src->time_stamp + arrivalDelay;
-          NetworkTimingModel(trans,ts,mContentionInterval,false,false,src_x,src_y,set<idx_t>());//ext->getToHome() -> false
+          NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_x,src_y,set<idx_t>());//ext->getToHome() -> false
           memDelay = arrivalDelay + packet_latency;//packet or flit latency
 
           //Send transaction
