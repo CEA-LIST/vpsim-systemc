@@ -110,11 +110,11 @@ namespace vpsim {
     using SimpleOutSocket = tlm_utils::simple_initiator_socket<CoherenceInterconnect>;
 
 
-    vector<tuple<uint64_t, uint64_t, idx_t, idx_t>> mAddressIDs;
+    vector<tuple<uint64_t, uint64_t, mesh_pos>> mAddressIDs;
     vector<uint64_t> mReadCount, mWriteCount; //for address mapped components
-    vector<tuple<uint64_t, uint64_t, uint64_t>> mCpuIDs;
-    vector<tuple<uint64_t, uint64_t, uint64_t>> mDeviceIDs;
-    vector<tuple<uint64_t, uint64_t, uint64_t, uint64_t>> mHomeIDs;
+    vector<tuple<uint64_t, mesh_pos>> mCpuIDs;
+    vector<tuple<uint64_t, mesh_pos>> mDeviceIDs;
+    vector<tuple<uint64_t, uint64_t, mesh_pos>> mHomeIDs;
 
     /**
      * a Mesh NoC model for NoC latency computation
@@ -194,7 +194,7 @@ namespace vpsim {
     inline uint64_t getRouterPacketsCount (size_t x, size_t y) { return RouterPacketsCount[x+(y*mX)];  }
 
     inline size_t   getMMappedSize() {return mAddressIDs.size();}
-    inline std::pair<size_t, size_t> getMMappedPos (size_t index) { return std::pair<size_t,size_t>(get<2>(mAddressIDs[index]),get<3>(mAddressIDs[index])); }
+    inline std::pair<size_t, size_t> getMMappedPos (size_t index) { return std::pair<size_t,size_t>(get<2>(mAddressIDs[index]).x_id,get<2>(mAddressIDs[index]).y_id); }
 
     inline uint64_t getReadCount (size_t index) {return mReadCount[index]; }
     inline uint64_t getWriteCount(size_t index) {return mWriteCount[index];}
@@ -253,7 +253,7 @@ namespace vpsim {
     uint64_t computeNoCLatency (bool isHome, bool isIdMapped, uint64_t addr, idx_t src_id, set<idx_t> dst_ids);
     void computeNoCPerformance (uint64_t distance, sc_time latency);
 
-    void FillInitTotalStats(idx_t id, idx_t src_x, idx_t src_y, uint64_t dist, sc_time lat);
+    void FillInitTotalStats(idx_t id, mesh_pos src_pos, uint64_t dist, sc_time lat);
 
     /**
     * NoC Contention model
@@ -264,12 +264,12 @@ namespace vpsim {
     void set_virtual_channels (uint32_t virtual_channels);
     void SavePacket(idx_t id, route path, uint32_t nbFlits=1);
     void Create_Noc(idx_t noc_x, idx_t noc_y);
-    route ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id, uint32_t nbFlits=1);
+    route ComputeRouteAndUpdateRouters(mesh_pos src_pos, mesh_pos dst_pos,idx_t id, uint32_t nbFlits=1);
     sc_time QueueWaitingTime(sc_time wait, sc_time router_latency, sc_time link_latency, sc_time time_interval, uint64_t queue_nbr_packets);
     sc_time PacketLatency(sc_time total_wait, sc_time router_latency, sc_time link_latency, uint64_t nbr_hops);
     sc_time ComputePacketLatency();
-    vector <tuple<idx_t,idx_t>> GetDestinations(tlm::tlm_generic_payload& trans, bool isHome, bool isIdMapped, set<idx_t> dst_ids);
-    void NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval,bool isHome, bool isIdMapped, uint32_t nbFlits, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device = false);
+    vector <mesh_pos> GetDestinations(tlm::tlm_generic_payload& trans, bool isHome, bool isIdMapped, set<idx_t> dst_ids);
+    void NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval,bool isHome, bool isIdMapped, uint32_t nbFlits, mesh_pos src_pos, set<idx_t> dst_ids, bool device = false);
 
     void PrintPath(route path);
     void PrintPacketBuffer();

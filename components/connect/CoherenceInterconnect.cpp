@@ -284,7 +284,7 @@ namespace vpsim {
     assert (x_id!= NULL_IDX && y_id!= NULL_IDX);
     if (x_id > mX || y_id > mY) throw runtime_error("Incorrect memory/LLC mesh coordinates.\n");
     else{
-      mAddressIDs.push_back (make_tuple(base, size, x_id, y_id));
+      mAddressIDs.push_back (make_tuple(base, size, mesh_pos{x_id, y_id}));
       mReadCount.push_back(UINT64_C(0));mWriteCount.push_back(UINT64_C(0));
     }
   }
@@ -292,19 +292,19 @@ namespace vpsim {
   void CoherenceInterconnect::register_cpu_ctrl (idx_t id, idx_t x_id, idx_t y_id) {
     assert (!IsCoherent || id!= NULL_IDX);
     if (x_id > mX || y_id > mY) throw runtime_error("Incorrect cache mesh coordinates.\n");
-    else mCpuIDs.push_back (make_tuple(id, x_id, y_id));
+    else mCpuIDs.push_back (make_tuple(id, mesh_pos{x_id, y_id}));
   }
 
   void CoherenceInterconnect::register_device_ctrl (idx_t id, idx_t x_id, idx_t y_id) {
     assert (!IsCoherent || id!= NULL_IDX);
     if (x_id > mX || y_id > mY) throw runtime_error("Incorrect device mesh coordinates.\n");
-    else mDeviceIDs.push_back (make_tuple(id, x_id, y_id));
+    else mDeviceIDs.push_back (make_tuple(id, mesh_pos{x_id, y_id}));
   }
 
   void CoherenceInterconnect::register_home_ctrl (uint64_t base, uint64_t size, idx_t x_id, idx_t y_id) {
     assert (x_id!= NULL_IDX && y_id!= NULL_IDX);
     if (x_id > mX || y_id > mY) throw runtime_error("Incorrect memory/LLC mesh coordinates.\n");
-    else mHomeIDs.push_back (make_tuple(base, size, x_id, y_id));
+    else mHomeIDs.push_back (make_tuple(base, size, mesh_pos{x_id, y_id}));
   }
 
   /**
@@ -314,9 +314,7 @@ namespace vpsim {
     index = 0;
     for (auto& mapping: mAddressIDs){
       if (addr >= get<0>(mapping) && addr < get<1>(mapping)+get<0>(mapping)) {
-        idx_t x_id = get<2>(mapping);
-        idx_t y_id = get<3>(mapping);
-        return { x_id, y_id };
+        return get<2>(mapping);
       }
       ++index;
     }
@@ -331,7 +329,7 @@ namespace vpsim {
   CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_noc_pos_by_address_with_interleave (uint64_t addr, size_t& index) {
     if(addr >= RamBaseAddr && addr < RamLastAddr){
       index += ((addr-RamBaseAddr) / InterleaveLength) % mAddressIDs.size();
-      return {get<2>(mAddressIDs[index]), get<3>(mAddressIDs[index])};
+      return get<2>(mAddressIDs[index]);
     }
     else
       return get_noc_pos_by_address (addr,index);
@@ -341,9 +339,7 @@ namespace vpsim {
     assert (id!= NULL_IDX);
     for (auto& mapping: mCpuIDs)
       if (id == get<0>(mapping)) {
-        idx_t x_id = get<1>(mapping);
-        idx_t y_id = get<2>(mapping);
-        return { x_id, y_id };
+        return get<1>(mapping);
       }
     throw runtime_error("Unknown ID: " + to_string(id));
   }
@@ -352,9 +348,7 @@ namespace vpsim {
     assert (id!= NULL_IDX);
     for (auto& mapping: mDeviceIDs)
       if (id == get<0>(mapping)) {
-        idx_t x_id = get<1>(mapping);
-        idx_t y_id = get<2>(mapping);
-        return { x_id, y_id };
+        return get<1>(mapping);
       }
     throw runtime_error("Unknown Device ID: " + to_string(id));
   }
@@ -362,9 +356,7 @@ namespace vpsim {
   CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_home_pos_by_address (uint64_t addr) {
     for (auto& mapping: mHomeIDs)
       if (addr >= get<0>(mapping) && addr < get<1>(mapping)+get<0>(mapping)) {
-        idx_t x_id = get<2>(mapping);
-        idx_t y_id = get<3>(mapping);
-        return { x_id, y_id };
+        return get<2>(mapping);
       }
     throw runtime_error("Unknown Address: " + to_string(addr));
   }
@@ -426,9 +418,9 @@ namespace vpsim {
   /**
   * NoC perf stats for each initiator
   */
-  void CoherenceInterconnect::FillInitTotalStats(idx_t id,idx_t src_x, idx_t src_y, uint64_t dist, sc_time lat)
+  void CoherenceInterconnect::FillInitTotalStats(idx_t id, mesh_pos src_pos, uint64_t dist, sc_time lat)
   {
-    string position=to_string(src_x) + '_' + to_string(src_y);
+    string position=to_string(src_pos.x_id) + '_' + to_string(src_pos.y_id);
     get<0>(initTotalStats[id])=position;
     get<1>(initTotalStats[id])+=1;
     get<2>(initTotalStats[id])+=dist;
@@ -467,12 +459,18 @@ namespace vpsim {
     }
   }
 
-  CoherenceInterconnect::route CoherenceInterconnect::ComputeRouteAndUpdateRouters(idx_t src_x,idx_t src_y, idx_t dst_x, idx_t dst_y,idx_t id, uint32_t nbFlits)
+  CoherenceInterconnect::route CoherenceInterconnect::ComputeRouteAndUpdateRouters(mesh_pos src_pos, mesh_pos dst_pos, idx_t id, uint32_t nbFlits)
   {
     idx_t i=0;
     idx_t j=0;
     sc_time t0=sc_time(0, SC_NS);
     route path;
+
+    idx_t src_x = src_pos.x_id;
+    idx_t src_y = src_pos.y_id;
+    idx_t dst_x = dst_pos.x_id;
+    idx_t dst_y = dst_pos.y_id;
+
     if((dst_x==src_x)&&(dst_y==src_y)){ // the destination router is the source router
         path.push_back(make_tuple(dst_x,dst_y,'L')); // the output port of the traversed router and its position are added to the packet's path
         for(uint32_t count=0;count<nbFlits;++count) ((noc[make_tuple(dst_x,dst_y)])['L']).insert(make_pair(id+count,t0)); // update the router's outputBuffer with the arriving packet's id
@@ -691,15 +689,15 @@ namespace vpsim {
     cout << "*****" << endl;
   }
 
-  vector <tuple<idx_t,idx_t>> CoherenceInterconnect::GetDestinations(tlm::tlm_generic_payload& trans, bool isHome, bool isIdMapped, set<idx_t> dst_ids) {
-    vector <tuple<idx_t,idx_t>> dest;
+  vector <CoherenceInterconnect::mesh_pos> CoherenceInterconnect::GetDestinations(tlm::tlm_generic_payload& trans, bool isHome, bool isIdMapped, set<idx_t> dst_ids) {
+    vector <mesh_pos> dest;
     mesh_pos dst_pos;
     if (!isIdMapped) {
       if(!isHome){
         size_t index = IndexFirstMemoryController;
         if(!InterleaveLength)   dst_pos = get_noc_pos_by_address(trans.get_address(), index);
         else                    dst_pos = get_noc_pos_by_address_with_interleave(trans.get_address(), index);
-        dest.push_back(make_tuple(dst_pos.x_id,dst_pos.y_id));
+        dest.push_back(dst_pos);
         //Update Memory Controllers Counters
         if(trans.get_command()==tlm::TLM_READ_COMMAND)
           mReadCount[index]+=trans.get_data_length();
@@ -708,37 +706,35 @@ namespace vpsim {
         return dest;
       } else {
         dst_pos = get_home_pos_by_address(trans.get_address());
-        dest.push_back(make_tuple(dst_pos.x_id,dst_pos.y_id));
+        dest.push_back(dst_pos);
         return dest;
       }
     } else {
       if (IsCoherent) {
         for (set<idx_t>::iterator it = dst_ids.begin(); it!=dst_ids.end(); it++) {
           dst_pos = get_noc_pos_by_id(*it);
-          dest.push_back(make_tuple(dst_pos.x_id,dst_pos.y_id));
+          dest.push_back(dst_pos);
         }
         return dest;
       } else {
         for (auto it = CacheOutputs.begin(); it != CacheOutputs.end(); ++it) {
           dst_pos = get_noc_pos_by_id(it->id);
-          dest.push_back(make_tuple(dst_pos.x_id,dst_pos.y_id));
+          dest.push_back(dst_pos);
         }
         return dest;
       }
     }
   }
 
-  void CoherenceInterconnect::NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval, bool isHome, bool isIdMapped, uint32_t nbFlits, idx_t src_x, idx_t src_y, set<idx_t> dst_ids, bool device){
+  void CoherenceInterconnect::NetworkTimingModel(tlm::tlm_generic_payload& trans, sc_time trans_time_stamp, sc_time time_interval, bool isHome, bool isIdMapped, uint32_t nbFlits, mesh_pos src_pos, set<idx_t> dst_ids, bool device){
     route path;
-    vector <tuple<idx_t,idx_t>> dest;
+    vector <mesh_pos> dest;
     if(device && trans.get_command()==tlm::TLM_READ_COMMAND){ //Reverse direction: memory -> device
-      dest.push_back(make_tuple(src_x,src_y));
+      dest.push_back(src_pos);
       size_t index = IndexFirstMemoryController; //index of the first memory controller
       mesh_pos src_pos;
       if(!InterleaveLength)   src_pos = get_noc_pos_by_address(trans.get_address(), index);
       else                    src_pos = get_noc_pos_by_address_with_interleave(trans.get_address(), index);
-      src_x = src_pos.x_id;
-      src_y = src_pos.y_id;
     }
     else{
       dest=GetDestinations(trans, isHome, isIdMapped, dst_ids);
@@ -749,7 +745,7 @@ namespace vpsim {
       interval_start=ts;
       interval_end=interval_start + time_interval;
       for (const auto& dst : dest){
-        path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst),totalFlits+1,nbFlits);
+        path=ComputeRouteAndUpdateRouters(src_pos, dst,totalFlits+1,nbFlits);
         TotalDistance+=nbFlits*path.size();
         SavePacket(totalFlits+1,path,nbFlits);
         totalFlits+=nbFlits;
@@ -758,7 +754,7 @@ namespace vpsim {
     else if(totalFlits>0){ //PacketBuffer is not empty
       if((ts>=interval_start)&&(ts<=interval_end)){ //packet arrived during time interval
         for (const auto& dst : dest){
-          path=ComputeRouteAndUpdateRouters(src_x,src_y, get<0>(dst), get<1>(dst), totalFlits+1, nbFlits);
+          path=ComputeRouteAndUpdateRouters(src_pos, dst, totalFlits+1, nbFlits);
           TotalDistance+=nbFlits*path.size();
           SavePacket(totalFlits+1,path,nbFlits);
           totalFlits+=nbFlits;
@@ -774,7 +770,7 @@ namespace vpsim {
         interval_start=ts; //Start a new time interval
         interval_end=interval_start + time_interval;
         for (const auto& dst : dest){
-          path=ComputeRouteAndUpdateRouters(src_x,src_y,get<0>(dst), get<1>(dst), totalFlits+1, nbFlits);
+          path=ComputeRouteAndUpdateRouters(src_pos, dst, totalFlits+1, nbFlits);
           TotalDistance+=nbFlits*path.size();
           SavePacket(totalFlits+1,path,nbFlits);
           totalFlits+=nbFlits;
@@ -826,15 +822,13 @@ namespace vpsim {
         computeNoCPerformance (dist, latency);
         if(mNoc_stats_per_initiator_on){
           mesh_pos src_pos = get_noc_pos_by_id(ext->getInitiatorId());
-          idx_t src_x = src_pos.x_id;
-          idx_t src_y = src_pos.y_id;
-          FillInitTotalStats(ext->getInitiatorId(),src_x, src_y, dist, latency);
+          FillInitTotalStats(ext->getInitiatorId(), src_pos, dist, latency);
         }
       }
       else{ // NoC performance model with contention
         sc_time ts = src->time_stamp + delay;
         mesh_pos src_pos = get_noc_pos_by_id(ext->getInitiatorId());
-        NetworkTimingModel(trans,ts,mContentionInterval,ext->getToHome(),isIdMapped,nbFlits,src_pos.x_id,src_pos.y_id,ext->getTargetIds());
+        NetworkTimingModel(trans,ts,mContentionInterval,ext->getToHome(),isIdMapped,nbFlits,src_pos,ext->getTargetIds());
 	      if (isDownstream) delay+=packet_latency;
       }
     }
@@ -896,8 +890,6 @@ namespace vpsim {
     sc_time maxDelay;     //Delay of the whole transaction once the access to the memory+the NoC traversal are achieved!
     sc_time tmpDelay;     //tmp as in tmp!
     mesh_pos src_pos = get_device_noc_pos_by_id(src->device_id);
-    idx_t src_x = src_pos.x_id;
-    idx_t src_y = src_pos.y_id;
 
     if(trans.get_command()==tlm::TLM_READ_COMMAND){
       if(!mIsMesh)
@@ -928,7 +920,7 @@ namespace vpsim {
             //Compute latency delay
             sc_time ts = src->time_stamp + arrivalDelay;
 
-            NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_x,src_y,set<idx_t>(),true);//Reverse direction
+            NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_pos,set<idx_t>(),true);//Reverse direction
             tmpDelay = memDelay + packet_latency; //Packet or flit latency
             if(tmpDelay>maxDelay) maxDelay=tmpDelay;  //Find a better way than to compare every time
           }
@@ -959,7 +951,7 @@ namespace vpsim {
 
           //Compute latency delay
           sc_time ts = src->time_stamp + arrivalDelay;
-          NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_x,src_y,set<idx_t>());//ext->getToHome() -> false
+          NetworkTimingModel(trans,ts,mContentionInterval,false,false,1,src_pos,set<idx_t>());//ext->getToHome() -> false
           memDelay = arrivalDelay + packet_latency;//packet or flit latency
 
           //Send transaction
