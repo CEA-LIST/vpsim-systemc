@@ -166,7 +166,7 @@ namespace vpsim{
     uint64_t MissCount, HitCount, NReads, NWrites, NInvals, NTotalInvals, NBackInvals, NEvicts, WriteBacks, EvictBacks,
       HitReads, HitWrites, MissReads, MissWrites, NPutS, NPutM, NPutI, NGetS, NGetM, NFwdGetS, NFwdGetM, ReadBacks;
     CacheInclusionPolicy InclusionOfHigher, InclusionOfLower;
-    idx_t IdTest;
+    idx_t Id;
 
     //!
     //! constructor of CacheBase
@@ -202,7 +202,7 @@ namespace vpsim{
     , HitCount          (0)
     , InclusionOfHigher (inclusionOfHigher)
     , InclusionOfLower  (inclusionOfLower)
-    , IdTest (id)
+    , Id (id)
       //, MaxLineSharers    (maxLineSharers)
     {
       NbLines = CacheSize / CacheLineSize;               //!< number of cache lines in the cache
@@ -255,7 +255,7 @@ namespace vpsim{
     }
 
  template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessNonCoherentCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
+  tlm::tlm_response_status accessNonCoherentCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
 
     uint64_t offset = addr & OffsetMask;
     uint64_t index  = (addr>>IndexShift) & IndexMask;
@@ -282,7 +282,7 @@ namespace vpsim{
     if (accessMode==Invalidate) { // No replacement
       NTotalInvals++;
       if (isHit) {
-        if (line->getState()==Modified) stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        if (line->getState()==Modified) stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         line->setState(Invalid);
         NInvals++;
       }
@@ -294,9 +294,9 @@ namespace vpsim{
       assert(Level!=1); // addr is the line base address
       NReads++;
       if (Sharers.find(addr)!=Sharers.end() && Sharers[addr].size()!=0)
-        stat = BackwardRead (src_data_ptr, addr, CacheLineSize, Sharers[addr], delay, timestamp);
+        stat = BackwardRead (src_data_ptr, addr, CacheLineSize, requesterId, Sharers[addr], delay, timestamp);
       else
-        stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, delay, timestamp);
+        stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
       Sharers[addr].insert(id);
       return stat; //"return" & multiline accesses: "return" can be used safely here since size=CacheLineSize if Level>1
 
@@ -305,13 +305,13 @@ namespace vpsim{
       // Write Back
       if (!isHit && line->getState()==Modified && WritePolicy==WBack) {
         WriteBacks++;
-        stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         line->setState(Invalid);
       }
       // Eviction, assumes exclusive policy with lower cache
       if (!isHit && line->getState()==Shared && InclusionOfLower==Exclusive) {
         // assumes WBack policy
-        stat = ForwardEvict (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = ForwardEvict (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         EvictBacks++;
       }
       // Invalidation, assumes inclusive policy with higher cache
@@ -336,7 +336,7 @@ namespace vpsim{
         assert(InclusionOfHigher!=Exclusive||isHit);
         Sharers[line->getAddress()].insert(id);
         if (!isHit) {
-          stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp); // get data from memory
+          stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp); // get data from memory
           line->setState(Shared);
         } else if (InclusionOfHigher==Exclusive){
           line->setState(Invalid);
@@ -350,21 +350,21 @@ namespace vpsim{
           if (Sharers.find(line->getAddress())!=Sharers.end() && Sharers[line->getAddress()].size()!=0) {
             line->setState(Invalid);
           } else {
-            stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+            stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
             cacheMemcpy (line->getDataPtr()+addr-line->getAddress(), src_data_ptr, accessSize);
             line->setState(Modified);
           }
         } else {
           if (WritePolicy==WThrough) // Forward to next level
-            stat = ForwardWriteData (line->getDataPtr(), addr, accessSize/*sizeof(WordType)*/, delay, timestamp);
+            stat = ForwardWriteData (line->getDataPtr(), addr, accessSize/*sizeof(WordType)*/, requesterId, delay, timestamp);
           else { // WritePolicy==WBack
-           if(!isHit) stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp); // Get line from memory
+           if(!isHit) stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp); // Get line from memory
             cacheMemcpy (line->getDataPtr()+addr-line->getAddress(), src_data_ptr, accessSize);
             line->setState(Modified);
           }
         }
         // Inclusive, forward updated line to maintain inclusion
-        if (InclusionOfLower==Inclusive) stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        if (InclusionOfLower==Inclusive) stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         /*if (Level != 1 && InclusionOfHigher==Exclusive) {
           //Sharers[line->getAddress()].erase(id);
           if (Sharers[line->getAddress()].size()!=0) {
@@ -386,8 +386,8 @@ namespace vpsim{
         assert (false); break; //throw runtime_error ("Command prohibited in non-coherent mode\n");
       }
       if (alignment) {
-        if (src_data_ptr) stat = this->accessNonCoherentCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, id, delay, timestamp, handle);
-        else stat = this->accessNonCoherentCache<accessMode> (NULL, size-accessSize, addr+accessSize, id, delay, timestamp, handle);
+        if (src_data_ptr) stat = this->accessNonCoherentCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, requesterId, id, delay, timestamp, handle);
+        else stat = this->accessNonCoherentCache<accessMode> (NULL, size-accessSize, addr+accessSize, requesterId, id, delay, timestamp, handle);
       }
     }
     return stat;
@@ -395,7 +395,7 @@ namespace vpsim{
 
 
   template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessCpuCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
+  tlm::tlm_response_status accessCpuCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
     uint64_t offset = addr & OffsetMask;
     uint64_t index  = (addr>>IndexShift) & IndexMask;
     uint64_t tag    = (addr>>TagShift) & TagMask;
@@ -423,14 +423,14 @@ namespace vpsim{
       assert (false); // replaced by FwdGetS
       break;
     case FwdGetS:
-      assert (id != NULL_IDX);
+      assert (initiatorId != NULL_IDX);
       assert (isHit); // Shared or Modified
       line->setState(Shared);
       NFwdGetS++;
       return stat;
       break;
     case FwdGetM:
-      assert (id != NULL_IDX);
+      assert (initiatorId != NULL_IDX);
       assert (isHit);
       line->setState(Invalid);
       NFwdGetM++;
@@ -451,11 +451,11 @@ namespace vpsim{
       WriteBacks++;
       switch (line->getState()) {
       case Modified:
-        stat = SendPutM (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = SendPutM (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         line->setState(Invalid);
         break;
       case Shared:
-        stat = SendPutS (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = SendPutS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         line->setState(Invalid);
         break;
       case Invalid:
@@ -468,7 +468,7 @@ namespace vpsim{
     // Writeback clean line to make room for allocating requests
     if (!isHit && line->getState()==Shared && InclusionOfLower==Exclusive) {
       assert (false); // L2-exclusive is only partially supported
-      stat = ForwardEvict (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+      stat = ForwardEvict (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
       NEvicts++;
     }
     // Prepare new line for allocating requests
@@ -485,14 +485,14 @@ namespace vpsim{
     switch (accessMode) {
     case Read:
       if (!isHit) {
-        stat = SendGetS (line->getDataPtr(), addr-offset, CacheLineSize, delay, timestamp); // get data from lower cache
+        stat = SendGetS (line->getDataPtr(), addr-offset, CacheLineSize, requesterId, delay, timestamp); // get data from lower cache
         line->setState(Shared);
       }
       NReads++;
       break;
     case Write: // WritePolicy==WBack
       if (line->getState() != Modified) {
-        stat = SendGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = SendGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         line->setState(Modified);
       }
       NWrites++;
@@ -502,15 +502,15 @@ namespace vpsim{
     }
 
     if (alignment) {
-      if (src_data_ptr) stat = this->accessCpuCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, id, delay, timestamp, handle);
-      else stat = this->accessCpuCache<accessMode> (NULL, size-accessSize, addr+accessSize, id, delay, timestamp, handle);
+      if (src_data_ptr) stat = this->accessCpuCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, requesterId, initiatorId, delay, timestamp, handle);
+      else stat = this->accessCpuCache<accessMode> (NULL, size-accessSize, addr+accessSize, requesterId, initiatorId, delay, timestamp, handle);
     }
     return stat;
   }
 
 
   template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessL2Cache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
+  tlm::tlm_response_status accessL2Cache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
     uint64_t offset = addr & OffsetMask;
     uint64_t index  = (addr>>IndexShift) & IndexMask;
     uint64_t tag    = (addr>>TagShift) & TagMask;
@@ -540,16 +540,16 @@ namespace vpsim{
     // Proceed Non-allocating requests
     switch (accessMode) { // should be addr not line->getAddress here
     case FwdGetS: // In Exclusive L3, Readbacks are FwdGetSs
-      assert (id != NULL_IDX);
+      assert (initiatorId != NULL_IDX);
       assert (Directory.find(addr) != Directory.end());
       assert (isHit||Directory[addr].State!=Invalid); // Shared or Modified
       assert (InclusionOfLower==Exclusive ||  ((isHit&&line->getState()==Modified)||Directory[addr].State==Modified));
       if (isHit && line->getState()==Modified) // on miss, line addr!=addr
         line->setState(Shared);
       if (!isHit&&Directory[addr].State==Shared) // Readback, exclusive policy
-        stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, Directory[addr].Sharers, delay, timestamp);
+        stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, requesterId, Directory[addr].Sharers, delay, timestamp);
       if (Directory[addr].State==Modified) {
-        stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, {Directory[addr].Owner}, delay, timestamp);
+        stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, requesterId, {Directory[addr].Owner}, delay, timestamp);
         Directory[addr] = { Shared, NULL_IDX, {Directory[addr].Owner}};
       }
       assert (Directory[addr].State!=Modified);
@@ -558,17 +558,17 @@ namespace vpsim{
       NFwdGetS++;
       return stat;
     case FwdGetM:
-      assert (id != NULL_IDX);
+      assert (initiatorId != NULL_IDX);
       assert (Directory.find(addr) != Directory.end());
       assert((isHit&&line->getState()==Modified)||Directory[addr].State==Modified);
       if (isHit)  line->setState(Invalid);
       switch (Directory[addr].State) { // Invalid clean/dirty copy in L1
       case Shared:
-        stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, {Directory[addr].Sharers}, delay, timestamp);
+        stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, requesterId, {Directory[addr].Sharers}, delay, timestamp);
         Directory[addr] = { Invalid, NULL_IDX, {}};
         break;
       case Modified:
-        stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, {Directory[addr].Owner}, delay, timestamp);
+        stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, requesterId, {Directory[addr].Owner}, delay, timestamp);
         Directory[addr] = { Invalid, NULL_IDX, {}};
         break;
       case Invalid: break;
@@ -582,10 +582,10 @@ namespace vpsim{
     case PutS: // Replacement on higher cache, line being in shared state
       assert (Directory.find(addr) != Directory.end());
       assert (Directory[addr].State==Shared);
-      Directory[addr].Sharers.erase(id);
+      Directory[addr].Sharers.erase(initiatorId);
       if (Directory[addr].Sharers.size()==0) {// Last PutS
         Directory[addr] = { Invalid, NULL_IDX, {} };
-        if (!isHit) stat = SendPutS (src_data_ptr, addr, CacheLineSize, delay, timestamp); // Line is no longer in caches, update LLC
+        if (!isHit) stat = SendPutS (src_data_ptr, addr, CacheLineSize, Id, delay, timestamp); // Line is no longer in caches, update LLC
       }
       assert (Directory[addr].State!=Modified);
       assert (Directory[addr].Owner==NULL_IDX);
@@ -599,7 +599,7 @@ namespace vpsim{
       if (isHit) line->setState(Invalid);
       if (Directory[addr].State==Shared) {
         //assert (Directory[addr].Sharers.size()!=0); // redundant
-        stat = SendPutI (src_data_ptr, addr, CacheLineSize, Directory[addr].Sharers, delay, timestamp);
+        stat = SendPutI (src_data_ptr, addr, CacheLineSize, requesterId, Directory[addr].Sharers, delay, timestamp);
         Directory[addr] = { Invalid, NULL_IDX, {}};
       }
       NPutI++;
@@ -619,14 +619,14 @@ namespace vpsim{
       switch (Directory[line->getAddress()].State) {
       case Invalid:
         if (line->getState()==Shared)
-          stat = SendPutS (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+          stat = SendPutS (line->getDataPtr(), line->getAddress(), CacheLineSize, Id, delay, timestamp);
         else // line state = Modified
-          stat = SendPutM (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+          stat = SendPutM (line->getDataPtr(), line->getAddress(), CacheLineSize, Id, delay, timestamp);
         break;
       case Shared:
         if (line->getState()==Modified)
           // TODO: Use another request type. GetS will be used for hit counting
-          stat = SendGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+          stat = SendGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, Id, delay, timestamp);
         break;
       case Modified:
         break;
@@ -650,12 +650,12 @@ namespace vpsim{
           assert(false); break;
         case Shared: // When this case occurs ?
           assert(false);
-          Directory[line->getAddress()].Sharers.erase(id);
+          Directory[line->getAddress()].Sharers.erase(initiatorId);
           if (Directory[line->getAddress()].Sharers.size()==0)  // Last PutM
             Directory[line->getAddress()] ={ Invalid, NULL_IDX, {} };
           break;
         case Modified:
-          assert (id == Directory[line->getAddress()].Owner);
+          assert (initiatorId == Directory[line->getAddress()].Owner);
           line->setState(Modified);
           Directory[line->getAddress()] = { Invalid, NULL_IDX, {} };
           break;
@@ -666,30 +666,30 @@ namespace vpsim{
     case GetS:
       if (Directory.find(line->getAddress()) == Directory.end()) {
         assert (!isHit);
-        stat = SendGetS (line->getDataPtr(), addr, CacheLineSize, delay, timestamp);
+        stat = SendGetS (line->getDataPtr(), addr, CacheLineSize, Id, delay, timestamp);
         line->setState(Shared);
-        Directory[line->getAddress()] = { Shared, NULL_IDX, {id} };
+        Directory[line->getAddress()] = { Shared, NULL_IDX, {initiatorId} };
       } else {
         switch (Directory[line->getAddress()].State) {
         case Invalid:
           if (!isHit) {
-            stat = SendGetS (line->getDataPtr(), addr, CacheLineSize, delay, timestamp);
+            stat = SendGetS (line->getDataPtr(), addr, CacheLineSize, Id, delay, timestamp);
             line->setState(Shared);
           }
-          Directory[line->getAddress()] = { Shared, NULL_IDX, {id} };
+          Directory[line->getAddress()] = { Shared, NULL_IDX, {initiatorId} };
           break;
         case Shared:
-          assert (find (Directory[line->getAddress()].Sharers.begin(),Directory[line->getAddress()].Sharers.end(),id)==Directory[line->getAddress()].Sharers.end());
+          assert (find (Directory[line->getAddress()].Sharers.begin(),Directory[line->getAddress()].Sharers.end(),initiatorId)==Directory[line->getAddress()].Sharers.end());
           if (!isHit) {
-            stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
+            stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
             line->setState(Shared);
           }
-          Directory[line->getAddress()].Sharers.insert(id);
+          Directory[line->getAddress()].Sharers.insert(initiatorId);
           break;
         case Modified:
-          assert (id != Directory[line->getAddress()].Owner);
-          stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, {Directory[line->getAddress()].Owner}, delay, timestamp); // get updated data
-          Directory[line->getAddress()] = {Shared, NULL_IDX, {id,  Directory[line->getAddress()].Owner}};
+          assert (initiatorId != Directory[line->getAddress()].Owner);
+          stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, {Directory[line->getAddress()].Owner}, delay, timestamp); // get updated data
+          Directory[line->getAddress()] = {Shared, NULL_IDX, {initiatorId,  Directory[line->getAddress()].Owner}};
           line->setState(Modified);
           break;
         }
@@ -703,33 +703,33 @@ namespace vpsim{
     case GetM:
       if (Directory.find(line->getAddress()) == Directory.end()) {
         assert (!isHit);
-        stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, delay, timestamp);
-        Directory[line->getAddress()] = { Modified, id, {} };
+        stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, Id, delay, timestamp);
+        Directory[line->getAddress()] = { Modified, initiatorId, {} };
       } else {
         switch (Directory[line->getAddress()].State) {
         case Invalid:
           if (line->getState()!=Modified) {
-            stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, delay, timestamp);
+            stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, Id, delay, timestamp);
           }
-          Directory[line->getAddress()] = { Modified, id, {} };
+          Directory[line->getAddress()] = { Modified, initiatorId, {} };
           break;
         case Shared:
-          if (line->getState()!=Modified) stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, delay, timestamp);
-          Directory[line->getAddress()].Sharers.erase(id);
+          if (line->getState()!=Modified) stat = SendGetM (line->getDataPtr(), addr, CacheLineSize, Id, delay, timestamp);
+          Directory[line->getAddress()].Sharers.erase(initiatorId);
           if (Directory[line->getAddress()].Sharers.size()!=0)
-            stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
-          Directory[line->getAddress()] = { Modified, id, {} };
+            stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
+          Directory[line->getAddress()] = { Modified, initiatorId, {} };
           break;
         case Modified: // What should be the line state
-          assert (id != Directory[line->getAddress()].Owner);
-          stat = SendFwdGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, {Directory[line->getAddress()].Owner}, delay, timestamp); // give updated data to requester
-          Directory[line->getAddress()].Owner = id;
+          assert (initiatorId != Directory[line->getAddress()].Owner);
+          stat = SendFwdGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, {Directory[line->getAddress()].Owner}, delay, timestamp); // give updated data to requester
+          Directory[line->getAddress()].Owner = initiatorId;
           break;
         }
       }
       line->setState(Shared);
       assert (Directory[line->getAddress()].State==Modified);
-      assert (Directory[line->getAddress()].Owner==id);
+      assert (Directory[line->getAddress()].Owner==initiatorId);
       assert (Directory[line->getAddress()].Sharers.size()==0);
       NGetM++;
       break;
@@ -739,7 +739,7 @@ namespace vpsim{
       assert (line->getState()==Shared||Directory[line->getAddress()].State==Shared);
       if (Directory[line->getAddress()].State==Shared) {
         assert (Directory[line->getAddress()].Sharers.size()!=0);
-        stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
+        stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
         Directory[line->getAddress()] = { Invalid, NULL_IDX, {} };
       }
       assert (Directory[line->getAddress()].State==Invalid);
@@ -760,7 +760,7 @@ namespace vpsim{
   }
 
     template<CoherenceCommand accessMode>
-    tlm::tlm_response_status accessCoherentHome (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
+    tlm::tlm_response_status accessCoherentHome (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
       uint64_t offset = addr & OffsetMask;
       uint64_t index  = (addr>>IndexShift) & IndexMask;
       uint64_t tag    = (addr>>TagShift) & TagMask;
@@ -771,7 +771,7 @@ namespace vpsim{
       bool alignment;
       //size_t accessSize;
 
-      assert (id!=NULL_IDX);
+      assert (initiatorId!=NULL_IDX);
       assert (offset==0);
       assert (size==CacheLineSize);
       assert (!isHit||(line->getAddress()<=addr && addr-line->getAddress()<CacheLineSize));
@@ -796,23 +796,23 @@ namespace vpsim{
         switch (accessMode) {
         case GetS:
           if (Directory.find(addr)==Directory.end()) { // Line has never been requested
-            stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, delay, timestamp);
-            Directory[addr] = { Shared, NULL_IDX, {id} };
+            stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
+            Directory[addr] = { Shared, NULL_IDX, {initiatorId} };
           } else {
             switch (Directory[addr].State) {
             case Invalid: // Line is not in upper cache
-              stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, delay, timestamp);
-              Directory[addr] = { Shared, NULL_IDX, {id} };
+              stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
+              Directory[addr] = { Shared, NULL_IDX, {initiatorId} };
               break;
             case Shared:// Line is in upper cache
-              stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, Directory[addr].Sharers, delay, timestamp);
-              Directory[addr].Sharers.insert(id);
+              stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, requesterId, Directory[addr].Sharers, delay, timestamp);
+              Directory[addr].Sharers.insert(initiatorId);
               break;
             case Modified:
-              // if Owner==id,  LLC should have latest version
-              if (Directory[addr].Owner!=id)
-                stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, {Directory[addr].Owner}, delay, timestamp);
-              Directory[addr] = { Shared, NULL_IDX, {id,  Directory[addr].Owner}};
+              // if Owner==initiatorId,  LLC should have latest version
+              if (Directory[addr].Owner!=initiatorId)
+                stat = SendFwdGetS (src_data_ptr, addr, CacheLineSize, requesterId, {Directory[addr].Owner}, delay, timestamp);
+              Directory[addr] = { Shared, NULL_IDX, {initiatorId,  Directory[addr].Owner}};
               break;
             }
           }
@@ -824,32 +824,32 @@ namespace vpsim{
           //break;
         case GetM:
           if (Directory.find(addr)==Directory.end()) { // Line has never been requested
-            stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, delay, timestamp);
-            Directory[addr] = { Modified, id, {} };
+            stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
+            Directory[addr] = { Modified, initiatorId, {} };
           } else {
             switch (Directory[addr].State) {
             case Invalid: // Line is not in upper cache
-              stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, delay, timestamp);
-              Directory[addr] = { Modified, id, {} };
+              stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
+              Directory[addr] = { Modified, initiatorId, {} };
               break;
             case Shared: // Line is in upper cache
-              //if (!(Directory[line->getAddress()].Sharers.size()==1&&Directory[line->getAddress()].Sharers.find(id)))
+              //if (!(Directory[line->getAddress()].Sharers.size()==1&&Directory[line->getAddress()].Sharers.find(initiatorId)))
               assert (Directory[addr].Sharers.size()!=0);
-              Directory[addr].Sharers.erase(id);
+              Directory[addr].Sharers.erase(initiatorId);
               if (Directory[addr].Sharers.size()!=0)
-                stat = SendPutI (src_data_ptr, addr, CacheLineSize, Directory[addr].Sharers, delay, timestamp);
-              Directory[addr] = {Modified, id, {}};
+                stat = SendPutI (src_data_ptr, addr, CacheLineSize, requesterId, Directory[addr].Sharers, delay, timestamp);
+              Directory[addr] = {Modified, initiatorId, {}};
               break;
             case Modified:
               assert (Directory[addr].Owner!=NULL_IDX);
-              assert (Directory[addr].Owner != id);
-              stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, {Directory[addr].Owner}, delay, timestamp);
-              Directory[addr].Owner = id;
+              assert (Directory[addr].Owner != initiatorId);
+              stat = SendFwdGetM (src_data_ptr, addr, CacheLineSize, requesterId, {Directory[addr].Owner}, delay, timestamp);
+              Directory[addr].Owner = initiatorId;
               break;
             }
           }
           assert (Directory[addr].State==Modified);
-          assert (Directory[addr].Owner==id);
+          assert (Directory[addr].Owner==initiatorId);
           assert (Directory[addr].Sharers.size()==0);
           NGetM++;
           return stat;
@@ -861,7 +861,7 @@ namespace vpsim{
       // Write-back dirty victim line
       if (!isHit && line->getState()==Modified && WritePolicy==WBack) {//TODO: WritePolicy==WBack in coherent mode
         WriteBacks++;
-        stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+        stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
       }
       // Prepare new line for allocating requests
       if (!isHit && AllocPolicy==WAllocate) {
@@ -884,7 +884,7 @@ namespace vpsim{
             assert (Directory[line->getAddress()].Sharers.size()>0);
             assert (Directory[line->getAddress()].Owner==NULL_IDX);
             assert(InclusionOfHigher!=Exclusive||!isHit);
-            Directory[line->getAddress()].Sharers.erase(id);
+            Directory[line->getAddress()].Sharers.erase(initiatorId);
             if (Directory[line->getAddress()].Sharers.size()==0) {// Last PutS
               Directory[line->getAddress()] = { Invalid, NULL_IDX, {} };
               if (InclusionOfHigher==Exclusive) line->setState(Shared);
@@ -906,7 +906,7 @@ namespace vpsim{
         case Modified:
           assert (Directory[line->getAddress()].Owner!=NULL_IDX);
           assert (Directory[line->getAddress()].Sharers.size()==0);
-          assert (id == Directory[line->getAddress()].Owner);
+          assert (initiatorId == Directory[line->getAddress()].Owner);
           Directory[line->getAddress()] = { Invalid, NULL_IDX, {} };
           break;
         }
@@ -917,9 +917,9 @@ namespace vpsim{
         if (Directory.find(line->getAddress())==Directory.end()) { // Line has never been requested
           assert (!isHit); // first request
           assert (InclusionOfHigher!=Exclusive);
-          stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, delay, timestamp);
+          stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
           line->setState(Shared);
-          Directory[line->getAddress()] = { Shared, NULL_IDX, {id} };
+          Directory[line->getAddress()] = { Shared, NULL_IDX, {initiatorId} };
         } else {
           switch (Directory[line->getAddress()].State) {
           case Invalid: // Line is not in upper cache
@@ -927,39 +927,39 @@ namespace vpsim{
             assert (Directory[line->getAddress()].Owner==NULL_IDX);
             if (!isHit) {
               assert (InclusionOfHigher!=Exclusive);
-              stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, delay, timestamp);
+              stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
               line->setState(Shared);
             } else if (InclusionOfHigher==Exclusive) {
               if (line->getState()==Modified)
-                stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp); // clean line
+                stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp); // clean line
               line->setState(Invalid);
             }
-            Directory[line->getAddress()] = { Shared, NULL_IDX, {id} };
+            Directory[line->getAddress()] = { Shared, NULL_IDX, {initiatorId} };
             break;
           case Shared: // Line is clean in upper cache
             assert (Directory[line->getAddress()].Owner==NULL_IDX);
             assert (Directory[line->getAddress()].Sharers.size()>0);
             if (!isHit) {
               assert (InclusionOfHigher!=Exclusive);
-              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
+              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
               line->setState(Shared);
             } else if (InclusionOfHigher==Exclusive) {
               if (line->getState()==Modified)
-                stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp); // clean line
+                stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp); // clean line
               line->setState(Invalid);
             }
-            Directory[line->getAddress()].Sharers.insert(id);
+            Directory[line->getAddress()].Sharers.insert(initiatorId);
             break;
           case Modified: // Line is dirty in upper cache
             assert (Directory[line->getAddress()].Sharers.size()==0);
             assert (Directory[line->getAddress()].Owner!= NULL_IDX);
-            //if (Directory[line->getAddress()].Owner!=id) // should neccesssarily be owner!=id if correctly designed
-            if (Directory[line->getAddress()].Owner!=id) // possible if eq to PutMGetS
-              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, {Directory[line->getAddress()].Owner}, delay, timestamp); // get updated data
-            Directory[line->getAddress()] = {Shared, NULL_IDX, {id,  Directory[line->getAddress()].Owner}};
+            //if (Directory[line->getAddress()].Owner!=initiatorId) // should neccesssarily be owner!=initiatorId if correctly designed
+            if (Directory[line->getAddress()].Owner!=initiatorId) // possible if eq to PutMGetS
+              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, {Directory[line->getAddress()].Owner}, delay, timestamp); // get updated data
+            Directory[line->getAddress()] = {Shared, NULL_IDX, {initiatorId,  Directory[line->getAddress()].Owner}};
             if (InclusionOfHigher==Exclusive) {
               assert (isHit); // Exclusive is non-allocating
-              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
               line->setState(Invalid);
             } else line->setState(Modified);
             break;
@@ -975,9 +975,9 @@ namespace vpsim{
         if (Directory.find(line->getAddress())==Directory.end()) { // Line has never been requested
           assert (!isHit); // first request
           assert (InclusionOfHigher!=Exclusive); // No line allocation in exclusive caches
-          stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, delay, timestamp);
+          stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
           line->setState(Shared); // Line is not dirty yet
-          Directory[line->getAddress()] = { Modified, id, {} };
+          Directory[line->getAddress()] = { Modified, initiatorId, {} };
         } else {
           switch (Directory[line->getAddress()].State) {
           case Invalid: // Line is not in upper cache
@@ -985,37 +985,37 @@ namespace vpsim{
             assert (Directory[line->getAddress()].Owner==NULL_IDX);
             if (!isHit) {
               assert (InclusionOfHigher!=Exclusive); // No line allocation in exclusive caches
-              stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, delay, timestamp);
+              stat = ForwardReadData (src_data_ptr, line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
               line->setState(Shared); // Line is not dirty yet
             } else if (InclusionOfHigher==Exclusive && line->getState()==Modified) { // clean line before invalidation
-              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
               line->setState(Invalid);
             }
-            Directory[line->getAddress()] = { Modified, id, {} };
+            Directory[line->getAddress()] = { Modified, initiatorId, {} };
             break;
           case Shared: // Line is clean in upper cache
             assert (Directory[line->getAddress()].Owner==NULL_IDX);
             assert (Directory[line->getAddress()].Sharers.size()>0);
             if (!isHit) {
               assert (InclusionOfHigher!=Exclusive); // No line allocation in exclusive caches
-              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
+              stat = SendFwdGetS (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
               line->setState(Shared);
             } else if (InclusionOfHigher==Exclusive && line->getState()==Modified) { // clean line before invalidation
-              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
+              stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
               line->setState(Invalid);
             }
-            Directory[line->getAddress()].Sharers.erase(id);
-            assert(Directory[line->getAddress()].Sharers.find(id) == Directory[line->getAddress()].Sharers.end());
+            Directory[line->getAddress()].Sharers.erase(initiatorId);
+            assert(Directory[line->getAddress()].Sharers.find(initiatorId) == Directory[line->getAddress()].Sharers.end());
             if (Directory[line->getAddress()].Sharers.size() != 0) // Invalidate all sharers
-              stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, Directory[line->getAddress()].Sharers, delay, timestamp);
-            Directory[line->getAddress()] = { Modified, id, {} };
+              stat = SendPutI (line->getDataPtr(), addr, CacheLineSize, requesterId, Directory[line->getAddress()].Sharers, delay, timestamp);
+            Directory[line->getAddress()] = { Modified, initiatorId, {} };
             break;
           case Modified: // Line is dirty in upper cache
             assert (Directory[line->getAddress()].Owner!=NULL_IDX);
-            assert (Directory[line->getAddress()].Owner != id);
+            assert (Directory[line->getAddress()].Owner != initiatorId);
             assert (Directory[line->getAddress()].Sharers.size()==0);
-            stat = SendFwdGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, {Directory[line->getAddress()].Owner}, delay, timestamp);
-            Directory[line->getAddress()].Owner = id;
+            stat = SendFwdGetM (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, {Directory[line->getAddress()].Owner}, delay, timestamp);
+            Directory[line->getAddress()].Owner = initiatorId;
             // Line is home and up-to-date, give dirty line to requester, no need for writeback
             //stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay, timestamp);
             if (InclusionOfHigher==Exclusive) line->setState(Invalid);
@@ -1025,7 +1025,7 @@ namespace vpsim{
         }
         NGetM++;
         assert (Directory[line->getAddress()].State==Modified);
-        assert (Directory[line->getAddress()].Owner==id);
+        assert (Directory[line->getAddress()].Owner==initiatorId);
         assert (Directory[line->getAddress()].Sharers.size()==0);
         break;
 
@@ -1051,31 +1051,31 @@ namespace vpsim{
     //!
     /*template<CacheAccessMode accessMode>*/
     /*  template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, int id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
+  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
     // id contains the initiator Id for downstream transactions and the target id for upstream transactions
     // TODO add verif on ids
     if (!IsCoherent)
-      return this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+      return this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
     else {
       if (!IsHome) return this-> accessCoherentLocalCache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
-      else         return this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+      else         return this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
     }
     }*/
   template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
+  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
     // id contains the initiator Id for downstream transactions and the target id for upstream transactions
     tlm::tlm_response_status stat = tlm::TLM_OK_RESPONSE;
     if (!IsCoherent)
-      stat = this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+      stat = this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
     else {
-      if (IsHome) stat = this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+      if (IsHome) stat = this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
       else
         switch (Level) {
         case 1:
-          stat = this-> accessCpuCache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+          stat = this-> accessCpuCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
           break;
         case 2:
-          stat = this-> accessL2Cache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
+          stat = this-> accessL2Cache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
           break;
         default:
           assert (false);
@@ -1122,8 +1122,8 @@ namespace vpsim{
       return tlm::TLM_OK_RESPONSE;
     };
 
-    virtual tlm::tlm_response_status ForwardReadData (unsigned char* cacheLineData, AddressType Addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status BackwardRead (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status ForwardReadData (unsigned char* cacheLineData, AddressType Addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status BackwardRead (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
 
     //!
     //! Function called by the cache itself whenever it must forward a write access to a next-level cache
@@ -1133,19 +1133,19 @@ namespace vpsim{
     //! @param [in] SrcBuffer	an allocated buffer of NbBytes size from which access data can be read
     //!
     virtual tlm::tlm_response_status ForwardWrite (AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status ForwardWriteData (unsigned char* cacheLineData, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status ForwardEvict (unsigned char* cacheLineData, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status ForwardWriteData (unsigned char* cacheLineData, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status ForwardEvict (unsigned char* cacheLineData, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     //virtual tlm::tlm_response_status BackInvalidate (AddressType addr, sc_time& delay) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status BackInvalidate (AddressType addr, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendPutS (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendPutM (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> sharerIds, /*const int id,*/ sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendFwdGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> ids, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendPutI (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendInvS (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendInvM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t id, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendPutS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendPutM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, /*const int id,*/ sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendFwdGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> ids, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendPutI (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendInvS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendInvM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
 
 
     //!
@@ -1157,9 +1157,9 @@ namespace vpsim{
     /*virtual tlm::tlm_response_status Read (AddressType addr, sc_time& delay){
       return AccessCache<false>(addr,  delay);
       }*/
-    virtual inline tlm::tlm_response_status ReadData (unsigned char* data_ptr, AddressType addr, size_t size,  idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr){
-      if (DataSupport) return accessCache<Read>(data_ptr, size, addr, initiatorId, delay, timestamp, handle);
-      else             return accessCache<Read>(NULL, size, addr, initiatorId, delay, timestamp, handle);
+    virtual inline tlm::tlm_response_status ReadData (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr){
+      if (DataSupport) return accessCache<Read>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
+      else             return accessCache<Read>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, handle);
     }
 
     //!
@@ -1171,60 +1171,60 @@ namespace vpsim{
     /*    virtual tlm::tlm_response_status Write (AddressType addr, sc_time& delay){
       return AccessCache<true>(addr,  delay);
       } */
-    virtual inline tlm::tlm_response_status WriteData (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr){
-      if (DataSupport) return accessCache<Write>(data_ptr, size, addr, initiatorId, delay, timestamp, handle);
-      else             return accessCache<Write>(NULL, size, addr, initiatorId, delay, timestamp, handle);
+    virtual inline tlm::tlm_response_status WriteData (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr){
+      if (DataSupport) return accessCache<Write>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
+      else             return accessCache<Write>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, handle);
     }
 
     virtual inline tlm::tlm_response_status InvalidateLine (AddressType addr, sc_time& delay, sc_time timestamp){
-      return accessCache<Invalidate>(NULL, CacheLineSize, addr, NULL_IDX, delay, timestamp, nullptr);
+      return accessCache<Invalidate>(NULL, CacheLineSize, addr, NULL_IDX, NULL_IDX, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status EvictLine (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<Evict>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<Evict>(NULL,     size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status EvictLine (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<Evict>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<Evict>(NULL,     size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessGetM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<GetM>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<GetM>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessGetM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<GetM>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<GetM>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessGetS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<GetS>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<GetS>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessGetS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<GetS>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<GetS>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessFwdGetM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<FwdGetM>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<FwdGetM>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessFwdGetM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<FwdGetM>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<FwdGetM>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessFwdGetS (unsigned char* data_ptr, AddressType addr,  size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<FwdGetS>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<FwdGetS>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessFwdGetS (unsigned char* data_ptr, AddressType addr,  size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<FwdGetS>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<FwdGetS>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessPutS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<PutS>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<PutS>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessPutS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<PutS>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<PutS>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessPutM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<PutM>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<PutM>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
-    }
-
-    virtual inline tlm::tlm_response_status AccessPutI (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<PutI>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<PutI>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessPutM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<PutM>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<PutM>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
 
-    virtual inline tlm::tlm_response_status AccessInvS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<InvS>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<InvS>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessPutI (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<PutI>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<PutI>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
 
-    virtual inline tlm::tlm_response_status AccessInvM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<InvM>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<InvM>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+    virtual inline tlm::tlm_response_status AccessInvS (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<InvS>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<InvS>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
-    virtual inline tlm::tlm_response_status AccessReadBack (unsigned char* data_ptr, AddressType addr, size_t size, idx_t initiatorId, sc_time& delay, sc_time timestamp){
-      if (DataSupport) return accessCache<ReadBack>(data_ptr, size, addr, initiatorId, delay, timestamp, nullptr);
-      else             return accessCache<ReadBack>(NULL, size, addr, initiatorId, delay, timestamp, nullptr);
+
+    virtual inline tlm::tlm_response_status AccessInvM (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<InvM>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<InvM>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+    }
+    virtual inline tlm::tlm_response_status AccessReadBack (unsigned char* data_ptr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp){
+      if (DataSupport) return accessCache<ReadBack>(data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
+      else             return accessCache<ReadBack>(NULL, size, addr, requesterId, initiatorId, delay, timestamp, nullptr);
     }
 
     /* TODO: Fix functions below */

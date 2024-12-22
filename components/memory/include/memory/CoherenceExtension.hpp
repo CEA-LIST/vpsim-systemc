@@ -21,13 +21,14 @@ namespace vpsim {
 
   //idx_t is the type to use for index or ids
   typedef uint32_t idx_t;
-  #define NULL_IDX ((idx_t) 0xffffffffffffffff)
+  #define NULL_IDX ((idx_t) 0xffffffff)
 
   enum CoherenceCommand { GetS, GetM, FwdGetS, FwdGetM, PutS, PutM, PutI, Read, Write, Evict, Invalidate, InvS, InvM, ReadBack };
 
   struct CoherencePayloadExtension : public tlm::tlm_extension<CoherencePayloadExtension> {
 
     idx_t initiatorId ;
+    idx_t requesterId = NULL_IDX;
     set<idx_t> targetIds = set<idx_t>();
     CoherenceCommand Command;
     bool ToHome = false; // Used in non-coherent mode, to determine the target of RD/WR commands
@@ -44,12 +45,14 @@ namespace vpsim {
       throw runtime_error("method copy_from not supported\n");
     }
 
-    inline void setInitiatorId(const idx_t id) { initiatorId = id; }
-    inline idx_t getInitiatorId (){ return initiatorId; }
+    inline void setInitiatorId  (const idx_t id)  { initiatorId = id; }
+    inline idx_t getInitiatorId ()                { return initiatorId; }
 
+    inline void setRequesterId  (const idx_t id)  { requesterId = id; }
+    inline idx_t getRequesterId ()                { return requesterId; }
 
-    inline void setTargetIds (set<idx_t> ids){ targetIds = ids; }
-    inline set<idx_t> getTargetIds() { return targetIds; }
+    inline void setTargetIds    (set<idx_t> ids)  { targetIds = ids; }
+    inline set<idx_t> getTargetIds()              { return targetIds; }
 
     /*
       void setSharerIds (vector<int>& sharerIds){ targetIds = sharerIds; }

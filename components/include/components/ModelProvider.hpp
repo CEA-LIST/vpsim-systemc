@@ -539,7 +539,7 @@ namespace vpsim {
         sc_time null;
         uint64_t phaddr=0;
         cpu->convertAddr((void*)addr,&phaddr);
-        cpu->icache.ReadData(nullptr, phaddr, size, cpu->index, null, null, (void*)tb_hit);
+        cpu->icache.ReadData(nullptr, phaddr, size, cpu->index, cpu->index, null, null, (void*)tb_hit);
         *(int**)tb_hit = &cpu->icache.mOne;
         return cpu->icache.MissCount;
     }

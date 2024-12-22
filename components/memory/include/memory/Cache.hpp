@@ -67,7 +67,6 @@ public:
   (name, CacheSize, CacheLineSize, Associativity, ReplPolicy, writePolicy, allocPolicy,
    dataSupport, level, inclusionOfHigher, inclusionOfLower, isHome, isCoherent, id)
     , DmiKeeper (1)
-    , Id  (id)
     , DataSupport (dataSupport)
     , Level (level)
     , IsHome (isHome)
@@ -99,23 +98,23 @@ public:
   }
 
   inline tlm::tlm_response_status ForwardRead (AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    return send_transaction (NULL, addr, size, tlm::TLM_READ_COMMAND, delay, timestamp);
+    return send_transaction (NULL, addr, size, NULL_IDX, tlm::TLM_READ_COMMAND, delay, timestamp);
   }
   inline tlm::tlm_response_status ForwardWrite (AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    return send_transaction (NULL, addr, size, tlm::TLM_WRITE_COMMAND, delay, timestamp);
+    return send_transaction (NULL, addr, size, NULL_IDX, tlm::TLM_WRITE_COMMAND, delay, timestamp);
   }
-  inline tlm::tlm_response_status ForwardReadData (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-      if (this->DataSupport) return send_transaction (lineDataPtr, addr, size, tlm::TLM_READ_COMMAND, delay, timestamp);
-      else                   return send_transaction (NULL       , addr, size, tlm::TLM_READ_COMMAND, delay, timestamp);
+  inline tlm::tlm_response_status ForwardReadData (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) override {
+      if (this->DataSupport) return send_transaction (lineDataPtr, addr, size, requesterId, tlm::TLM_READ_COMMAND, delay, timestamp);
+      else                   return send_transaction (NULL       , addr, size, requesterId, tlm::TLM_READ_COMMAND, delay, timestamp);
   }
-  inline tlm::tlm_response_status BackwardRead (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status BackwardRead (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
     assert (targetIds.size()>=0);
-    if (this->DataSupport) return send_readback_transaction (lineDataPtr, addr, size, targetIds, delay, timestamp);
-    else                   return send_readback_transaction (NULL       , addr, size, targetIds, delay, timestamp);
+    if (this->DataSupport) return send_readback_transaction (lineDataPtr, addr, size, requesterId, targetIds, delay, timestamp);
+    else                   return send_readback_transaction (NULL       , addr, size, requesterId, targetIds, delay, timestamp);
   }
-  inline tlm::tlm_response_status ForwardWriteData (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-      if (this->DataSupport) return send_transaction (lineDataPtr, addr, size, tlm::TLM_WRITE_COMMAND, delay, timestamp);
-      else                   return send_transaction (NULL       , addr, size, tlm::TLM_WRITE_COMMAND, delay, timestamp);
+  inline tlm::tlm_response_status ForwardWriteData (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) override {
+      if (this->DataSupport) return send_transaction (lineDataPtr, addr, size, requesterId, tlm::TLM_WRITE_COMMAND, delay, timestamp);
+      else                   return send_transaction (NULL       , addr, size, requesterId, tlm::TLM_WRITE_COMMAND, delay, timestamp);
   }
   /*inline tlm::tlm_response_status BackInvalidate (AddressType addr, sc_time& delay) override {
     return send_invalidate_transaction (addr, delay);
@@ -124,50 +123,50 @@ public:
     assert (targetIds.size()>=0);
     return send_invalidate_transaction (addr, targetIds, delay, timestamp);
   }
-  inline tlm::tlm_response_status ForwardEvict (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    if (this->DataSupport) return send_evict_transaction (lineDataPtr, addr, size, delay, timestamp);
-    else                   return send_evict_transaction (NULL       , addr, size, delay, timestamp);
+  inline tlm::tlm_response_status ForwardEvict (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) override {
+    if (this->DataSupport) return send_evict_transaction (lineDataPtr, addr, size, requesterID, delay, timestamp);
+    else                   return send_evict_transaction (NULL       , addr, size, requesterID, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendGetS (unsigned char* lineDataPtr, AddressType addr, size_t size,  sc_time& delay, sc_time timestamp) override {
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, std::set<idx_t>(), GetS, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, std::set<idx_t>(), GetS, delay, timestamp);
+  inline tlm::tlm_response_status SendGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) override {
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, std::set<idx_t>(), GetS, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, std::set<idx_t>(), GetS, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, std::set<idx_t>(), GetM, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, std::set<idx_t>(), GetM, delay, timestamp);
+  inline tlm::tlm_response_status SendGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) override {
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, std::set<idx_t>(), GetM, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, std::set<idx_t>(), GetM, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendPutS (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, std::set<idx_t>(), PutS, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, std::set<idx_t>(), PutS, delay, timestamp);
+  inline tlm::tlm_response_status SendPutS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) override {
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, std::set<idx_t>(), PutS, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, std::set<idx_t>(), PutS, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendPutM (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) override {
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, std::set<idx_t>(), PutM, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, std::set<idx_t>(), PutM, delay, timestamp);
+  inline tlm::tlm_response_status SendPutM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) override {
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, std::set<idx_t>(), PutM, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, std::set<idx_t>(), PutM, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds /*,const int targetId*/, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, set<idx_t> targetIds /*,const int targetId*/, sc_time& delay, sc_time timestamp) override {
     //assert (targetId!=NULL_IDX);
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, targetIds, FwdGetS, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, targetIds, FwdGetS, delay, timestamp);
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, targetIds, FwdGetS, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, targetIds, FwdGetS, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendFwdGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status SendFwdGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
     //assert (targetIds!=NULL_IDX);
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, targetIds, FwdGetM, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, targetIds, FwdGetM, delay, timestamp);
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, targetIds, FwdGetM, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, targetIds, FwdGetM, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendPutI (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status SendPutI (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
     assert (targetIds.size()>0);
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, targetIds, PutI, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, targetIds, PutI, delay, timestamp);
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, targetIds, PutI, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, targetIds, PutI, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendInvS (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status SendInvS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) override {
     assert (targetIds.size()>0);
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, targetIds, InvS, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, targetIds, InvS, delay, timestamp);
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, targetIds, InvS, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, targetIds, InvS, delay, timestamp);
   }
-  inline tlm::tlm_response_status SendInvM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t targetId, sc_time& delay, sc_time timestamp) override {
+  inline tlm::tlm_response_status SendInvM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, idx_t targetId, sc_time& delay, sc_time timestamp) override {
     assert (targetId!=NULL_IDX);
-    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, Id, {targetId}, InvM, delay, timestamp);
-    else                   return send_coherence_transaction (NULL       , addr, size, Id, {targetId}, InvM, delay, timestamp);
+    if (this->DataSupport) return send_coherence_transaction (lineDataPtr, addr, size, requesterID, this->Id, {targetId}, InvM, delay, timestamp);
+    else                   return send_coherence_transaction (NULL       , addr, size, requesterID, this->Id, {targetId}, InvM, delay, timestamp);
   }
 
   uint64_t getMisses()      { return this->MissCount;    }
@@ -194,18 +193,15 @@ public:
 
 
   bool isPriv;
-  SourceCpuExtension CpuExt;
-  void setCpuId(int cpu){ CpuExt.cpu_id = cpu; }
   void setIsPriv(bool priv) { isPriv=priv; }
 
 private:
   //int countAccess = 0;
-  idx_t Id = NULL_IDX;
   bool DataSupport;
   uint32_t Level;
   bool IsHome;
 
-  tlm::tlm_response_status send_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, const tlm::tlm_command command, sc_time& delay, sc_time timestamp){
+  tlm::tlm_response_status send_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, const tlm::tlm_command command, sc_time& delay, sc_time timestamp){
     size_t nb_bytes = size;
     tlm::tlm_generic_payload trans;
     trans.set_command (command);
@@ -219,10 +215,11 @@ private:
     assert (command != tlm::TLM_IGNORE_COMMAND);
     CoherencePayloadExtension ext;
     ext.setToHome (!IsHome); // No communication between homes
-    ext.setInitiatorId (Id); // Use cpu Ids for transactions between cpu private caches and shared LLCs
+    ext.setInitiatorId (this->Id); // Use cpu Ids for transactions between cpu private caches and shared LLCs
+    ext.setRequesterId (requesterId);
     trans.set_extension<CoherencePayloadExtension>(&ext);
     SourceCpuExtension src;
-    src.cpu_id = Id;
+    src.cpu_id = this->Id;  //TODO change
     src.time_stamp = timestamp;
     trans.set_extension<SourceCpuExtension>(&src);
     socket_out[0] -> b_transport (trans, delay);
@@ -231,7 +228,7 @@ private:
     return (trans.get_response_status());
   }
 
-  tlm::tlm_response_status send_coherence_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t initiatorId, set<idx_t> targetIds, const CoherenceCommand command,  sc_time& delay, sc_time timestamp) {
+  tlm::tlm_response_status send_coherence_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, idx_t initiatorId, set<idx_t> targetIds, const CoherenceCommand command,  sc_time& delay, sc_time timestamp) {
     size_t nb_bytes = size;
     tlm::tlm_generic_payload trans;
     trans.set_command (tlm::TLM_IGNORE_COMMAND);
@@ -246,6 +243,7 @@ private:
     ext.setCoherenceCommand (command);
     //ext.setInitiatorId (Id); // Use cache ids
     ext.setInitiatorId (initiatorId); // TODO: Use cpu Ids for transactions between cpu private caches and shared LLCs??
+    ext.setRequesterId (requesterId);
     if (command==FwdGetS||command==FwdGetM||command==PutI||command==InvS||command==InvM){
       if (IsHome) assert (targetIds.size()>0);
       ext.setTargetIds (targetIds);
@@ -253,7 +251,7 @@ private:
     trans.set_extension<CoherencePayloadExtension>(&ext);
 
     SourceCpuExtension src;
-    src.cpu_id = Id;
+    src.cpu_id = this->Id; //TODO change
     src.time_stamp = timestamp;
     trans.set_extension<SourceCpuExtension>(&src);
 
@@ -286,7 +284,7 @@ private:
     trans.set_gp_option (tlm::TLM_MIN_PAYLOAD); //It is not a real TLM access
     trans.set_response_status (tlm::TLM_INCOMPLETE_RESPONSE);
     CoherencePayloadExtension ext;
-    ext.setInitiatorId (Id); // Use cache Ids for transactions between private caches of the same cpu
+    ext.setInitiatorId (this->Id); // Use cache Ids for transactions between private caches of the same cpu
     //ext.disableDefaultTarget();
     ext.setCoherenceCommand (Invalidate);
     ext.setToHome (!IsHome);
@@ -294,7 +292,7 @@ private:
     ext.setTargetIds (targetIds);
     trans.set_extension<CoherencePayloadExtension>(&ext);
     SourceCpuExtension src;
-    src.cpu_id = Id;
+    src.cpu_id = this->Id; //TODO change
     src.time_stamp = timestamp;
     trans.set_extension<SourceCpuExtension>(&src);
     if (IsHome) socket_out[0] -> b_transport (trans, delay);
@@ -304,7 +302,7 @@ private:
     return (trans.get_response_status());
   }
 
-  tlm::tlm_response_status send_evict_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, sc_time& delay, sc_time timestamp) {
+  tlm::tlm_response_status send_evict_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterID, sc_time& delay, sc_time timestamp) {
     size_t nb_bytes = size;
     tlm::tlm_generic_payload trans;
     trans.set_command (tlm::TLM_IGNORE_COMMAND);
@@ -316,12 +314,12 @@ private:
     trans.set_gp_option (tlm::TLM_MIN_PAYLOAD); //It is not a real TLM access
     trans.set_response_status (tlm::TLM_INCOMPLETE_RESPONSE);
     CoherencePayloadExtension ext;
-    ext.setInitiatorId (Id); // Use cache Ids for transactions between private caches of the same cpu
+    ext.setInitiatorId (this->Id); // Use cache Ids for transactions between private caches of the same cpu
     ext.setCoherenceCommand (Evict);
     ext.setToHome (!IsHome);
     trans.set_extension<CoherencePayloadExtension>(&ext);
     SourceCpuExtension src;
-    src.cpu_id = Id;
+    src.cpu_id = this->Id; //TODO change
     src.time_stamp = timestamp;
     trans.set_extension<SourceCpuExtension>(&src);
     socket_out[0] -> b_transport (trans, delay);
@@ -330,7 +328,7 @@ private:
     return (trans.get_response_status());
   }
 
-    tlm::tlm_response_status send_readback_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) {
+    tlm::tlm_response_status send_readback_transaction (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> targetIds, sc_time& delay, sc_time timestamp) {
     size_t nb_bytes = size;
     tlm::tlm_generic_payload trans;
     trans.set_command (tlm::TLM_IGNORE_COMMAND);
@@ -342,14 +340,14 @@ private:
     trans.set_gp_option (tlm::TLM_MIN_PAYLOAD);
     trans.set_response_status (tlm::TLM_INCOMPLETE_RESPONSE);
     CoherencePayloadExtension ext;
-    ext.setInitiatorId (Id);
+    ext.setInitiatorId (this->Id);
     ext.setCoherenceCommand (ReadBack);
     ext.setToHome (!IsHome);
     if (IsHome) assert (targetIds.size()>0);
     ext.setTargetIds (targetIds);
     trans.set_extension<CoherencePayloadExtension>(&ext);
     SourceCpuExtension src;
-    src.cpu_id = Id;
+    src.cpu_id = this->Id; //TODO change 
     src.time_stamp = timestamp;
     trans.set_extension<SourceCpuExtension>(&src);
     if (IsHome) socket_out[0] -> b_transport (trans, delay);
@@ -383,12 +381,11 @@ public:
     tlm::tlm_response_status rsp = tlm::TLM_OK_RESPONSE;
     AddressType addr        = (AddressType) trans.get_address();
     idx_t srcId;
-
+    idx_t requesterId=NULL_IDX;
     //delay += Latency;
     CoherencePayloadExtension* ext;
     trans.get_extension<CoherencePayloadExtension>(ext); // not mandatory extension
 
-    // TODO: remove duplications in cpuExt and CputExt
     SourceCpuExtension* cpuExt;
     trans.get_extension<SourceCpuExtension>(cpuExt);
 
@@ -401,6 +398,7 @@ public:
     } else {
       assert (ext); // necessarily coherence transaction
       srcId = ext->getInitiatorId ();
+      requesterId = ext->getRequesterId();
     }
     /* if (((Level==1)&&((trans.get_command()==tlm::TLM_READ_COMMAND)||(trans.get_command()==tlm::TLM_WRITE_COMMAND)))
           ||  ((Level!=1)&&(trans.get_command()==tlm::TLM_READ_COMMAND)))
@@ -408,55 +406,55 @@ public:
     */
     switch (trans.get_command()) {
     case tlm::TLM_WRITE_COMMAND : // From CPU in coherent mode, From CPU or higher caches in non-coherent mode
-      rsp = this-> WriteData (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp, nullptr);
+      rsp = this-> WriteData (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp, nullptr);
       if (Level==1) delay += Latency;
       break;
     case tlm::TLM_READ_COMMAND : // From CPU in coherent mode, From CPU or higher caches in non-coherent mode
-      rsp = this-> ReadData (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp, nullptr);
+      rsp = this-> ReadData (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp, nullptr);
       delay += Latency;
       break;
     case tlm::TLM_IGNORE_COMMAND : // Coherence transactions from caches in coherent mode
                                    // Only Evict and Invalidate in non-coherent mode
       switch (ext->getCoherenceCommand()) {
       case GetS:
-        rsp = this-> AccessGetS (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessGetS (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         delay += Latency;
         break;
       case GetM:
-        rsp = this-> AccessGetM (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessGetM (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         delay += Latency;
         break;
       case FwdGetS:
-        rsp = this-> AccessFwdGetS (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessFwdGetS (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         delay += Latency;
         break;
       case FwdGetM:
-        rsp = this-> AccessFwdGetM (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessFwdGetM (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         delay += Latency;
         break;
       case PutS:
-        rsp = this-> AccessPutS (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessPutS (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case PutM:
-        rsp = this-> AccessPutM (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessPutM (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case PutI:
-        rsp = this-> AccessPutI (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessPutI (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case Evict:
-        rsp = this-> EvictLine (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> EvictLine (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case Invalidate:
         rsp = this-> InvalidateLine (addr, delay, timestamp);
         break;
       case InvS:
-        rsp = this-> AccessInvS (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessInvS (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case InvM:
-        rsp = this-> AccessInvM (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessInvM (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         break;
       case ReadBack:
-        rsp = this-> AccessReadBack (trans.get_data_ptr(), addr, trans.get_data_length(), srcId, delay, timestamp);
+        rsp = this-> AccessReadBack (trans.get_data_ptr(), addr, trans.get_data_length(), requesterId, srcId, delay, timestamp);
         delay += Latency;
         break;
       default: assert(false); break; //throw runtime_error("Not a permitted coherence transaction\n");

@@ -1246,7 +1246,6 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
                              incl_lower,
                              getAttrAsUInt64("is_home"),
                              getAttrAsUInt64("is_coherent"));
-      mModulePtr->setCpuId(getAttrAsUInt64("cpu"));
       setId(getAttrAsUInt64("id"));
       if (getAttrAsUInt64("local")) {
         mModulePtr->setIsPriv(true);
