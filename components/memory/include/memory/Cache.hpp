@@ -240,6 +240,7 @@ private:
     trans.set_gp_option (tlm::TLM_MIN_PAYLOAD);
     trans.set_response_status (tlm::TLM_INCOMPLETE_RESPONSE);
     CoherencePayloadExtension ext;
+    ext.setToHome (!IsHome);
     ext.setCoherenceCommand (command);
     //ext.setInitiatorId (Id); // Use cache ids
     ext.setInitiatorId (initiatorId); // TODO: Use cpu Ids for transactions between cpu private caches and shared LLCs??
