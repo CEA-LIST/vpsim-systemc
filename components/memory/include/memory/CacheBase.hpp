@@ -255,7 +255,7 @@ namespace vpsim{
     }
 
  template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessNonCoherentCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
+  tlm::tlm_response_status accessNonCoherentCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp, void* handle=nullptr) {
 
     uint64_t offset = addr & OffsetMask;
     uint64_t index  = (addr>>IndexShift) & IndexMask;
@@ -297,7 +297,7 @@ namespace vpsim{
         stat = BackwardRead (src_data_ptr, addr, CacheLineSize, requesterId, Sharers[addr], delay, timestamp);
       else
         stat = ForwardReadData (src_data_ptr, addr, CacheLineSize, requesterId, delay, timestamp);
-      Sharers[addr].insert(id);
+      Sharers[addr].insert(initiatorId);
       return stat; //"return" & multiline accesses: "return" can be used safely here since size=CacheLineSize if Level>1
 
     } else {
@@ -334,7 +334,7 @@ namespace vpsim{
       switch (accessMode) {
       case Read:
         assert(InclusionOfHigher!=Exclusive||isHit);
-        Sharers[line->getAddress()].insert(id);
+        Sharers[line->getAddress()].insert(initiatorId);
         if (!isHit) {
           stat = ForwardReadData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp); // get data from memory
           line->setState(Shared);
@@ -345,7 +345,7 @@ namespace vpsim{
         NReads++;
         break;
       case Write:
-        Sharers[line->getAddress()].erase(id);
+        Sharers[line->getAddress()].erase(initiatorId);
         if (InclusionOfHigher==Exclusive && !isHit) {
           if (Sharers.find(line->getAddress())!=Sharers.end() && Sharers[line->getAddress()].size()!=0) {
             line->setState(Invalid);
@@ -366,7 +366,7 @@ namespace vpsim{
         // Inclusive, forward updated line to maintain inclusion
         if (InclusionOfLower==Inclusive) stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, requesterId, delay, timestamp);
         /*if (Level != 1 && InclusionOfHigher==Exclusive) {
-          //Sharers[line->getAddress()].erase(id);
+          //Sharers[line->getAddress()].erase(initiatorId);
           if (Sharers[line->getAddress()].size()!=0) {
             stat = ForwardWriteData (line->getDataPtr(), line->getAddress(), CacheLineSize, delay);
             line->setState(Invalid);
@@ -377,7 +377,7 @@ namespace vpsim{
       case Evict: // From higher cache
         assert (InclusionOfHigher==Exclusive);
         cacheMemcpy (line->getDataPtr()+addr-line->getAddress(), src_data_ptr, accessSize);
-        Sharers[line->getAddress()].erase(id);
+        Sharers[line->getAddress()].erase(initiatorId);
         assert(!isHit||line->getState()==Modified);
         if (Sharers[line->getAddress()].size()!=0) line->setState(Invalid); else line->setState(Shared);
         NEvicts++;
@@ -386,8 +386,8 @@ namespace vpsim{
         assert (false); break; //throw runtime_error ("Command prohibited in non-coherent mode\n");
       }
       if (alignment) {
-        if (src_data_ptr) stat = this->accessNonCoherentCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, requesterId, id, delay, timestamp, handle);
-        else stat = this->accessNonCoherentCache<accessMode> (NULL, size-accessSize, addr+accessSize, requesterId, id, delay, timestamp, handle);
+        if (src_data_ptr) stat = this->accessNonCoherentCache<accessMode> (src_data_ptr+accessSize, size-accessSize, addr+accessSize, requesterId, initiatorId, delay, timestamp, handle);
+        else stat = this->accessNonCoherentCache<accessMode> (NULL, size-accessSize, addr+accessSize, requesterId, initiatorId, delay, timestamp, handle);
       }
     }
     return stat;
@@ -1051,31 +1051,28 @@ namespace vpsim{
     //!
     /*template<CacheAccessMode accessMode>*/
     /*  template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
-    // id contains the initiator Id for downstream transactions and the target id for upstream transactions
-    // TODO add verif on ids
+  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
     if (!IsCoherent)
-      return this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+      return this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
     else {
-      if (!IsHome) return this-> accessCoherentLocalCache<accessMode>(src_data_ptr, size, addr, id, delay, timestamp, handle);
-      else         return this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+      if (!IsHome) return this-> accessCoherentLocalCache<accessMode>(src_data_ptr, size, addr, initiatorId, delay, timestamp, handle);
+      else         return this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
     }
     }*/
   template<CoherenceCommand accessMode>
-  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t id, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
-    // id contains the initiator Id for downstream transactions and the target id for upstream transactions
+  tlm::tlm_response_status accessCache (unsigned char* src_data_ptr, size_t size, AddressType addr, idx_t requesterId, idx_t initiatorId, sc_time& delay, sc_time timestamp=sc_time(0,SC_NS), void* handle=nullptr) {
     tlm::tlm_response_status stat = tlm::TLM_OK_RESPONSE;
     if (!IsCoherent)
-      stat = this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+      stat = this-> accessNonCoherentCache<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
     else {
-      if (IsHome) stat = this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+      if (IsHome) stat = this-> accessCoherentHome<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
       else
         switch (Level) {
         case 1:
-          stat = this-> accessCpuCache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+          stat = this-> accessCpuCache<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
           break;
         case 2:
-          stat = this-> accessL2Cache<accessMode>(src_data_ptr, size, addr, requesterId, id, delay, timestamp, handle);
+          stat = this-> accessL2Cache<accessMode>(src_data_ptr, size, addr, requesterId, initiatorId, delay, timestamp, handle);
           break;
         default:
           assert (false);
@@ -1141,7 +1138,7 @@ namespace vpsim{
     virtual tlm::tlm_response_status SendGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status SendPutS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status SendPutM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
-    virtual tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, /*const int id,*/ sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
+    virtual tlm::tlm_response_status SendFwdGetS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status SendFwdGetM (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> ids, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status SendPutI (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
     virtual tlm::tlm_response_status SendInvS (unsigned char* lineDataPtr, AddressType addr, size_t size, idx_t requesterId, set<idx_t> sharerIds, sc_time& delay, sc_time timestamp) { return tlm::TLM_OK_RESPONSE; }
