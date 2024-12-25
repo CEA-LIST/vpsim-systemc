@@ -160,6 +160,20 @@ add_library(elfio INTERFACE)
 target_include_directories(elfio INTERFACE extern/elfio)
 
 #####################################################################
+# tbb installation
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/CMake/CMakeLists-tbb.txt.in
+        ${CMAKE_CURRENT_BINARY_DIR}/tbb-download/CMakeLists.txt)
+
+execute_process(COMMAND "${CMAKE_COMMAND}" -G "${CMAKE_GENERATOR}" .
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tbb-download" )
+
+execute_process(COMMAND "${CMAKE_COMMAND}" --build .
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tbb-download" )
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/extern/tbb)
+
+#####################################################################
 # RapidXML installation
 #
 # Small header only library
@@ -342,6 +356,7 @@ target_include_directories(vpsim_components PUBLIC
         components/templates/include
         components/clean_components/include
         components/include
+        extern/tbb/include/tbb
         )
 
 target_include_directories(vpsim_components PRIVATE
@@ -352,6 +367,7 @@ target_include_directories(vpsim_components PRIVATE
 target_link_libraries(vpsim_components PUBLIC
         vpsim_core
         elfio
+        tbb
         util
         ${CMAKE_DL_LIBS})
 

@@ -24,7 +24,7 @@
 #include "tlm_utils/simple_initiator_socket.h"
 #include "atomicops.h"
 #include "CosimExtensions.hpp"
-#include "readerwriterqueue.h"
+#include "concurrent_priority_queue.h"
 #include "IOAccessCosim.hpp"
 #include <atomic>
 #include <map>
@@ -49,7 +49,7 @@ enum OuterStat {
 };
 #define MAX_CPUS 256
 #define DECOUPLED_QUANTUMS 100000
-#define EPOCHS 2
+#define EPOCHS 2 // for the priority_queue to be used correctly, EPOCHS must be higher than 1
 
 
 class MainMemCosim {
@@ -58,7 +58,6 @@ public:	static struct Req {
 		void* phys;
 		unsigned int size;// This is how it is defined in SystemC
 		uint32_t id;
-		//double time_stamp;
 		uint64_t time_stamp;
 		uint8_t write;
 		uint64_t tag;
@@ -80,9 +79,8 @@ public:	static struct Req {
 		_Buffer.size=size;
 		_Buffer.fetch=0;
 		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp= exec + (sc_time_stamp().to_seconds())*1000000000;//(double)
-		// enqueue request
-		while(!_Q.try_enqueue(_Buffer));
+        _Buffer.time_stamp= exec + _epoch_sc_time;
+		_PQ.push(_Buffer);
 	}
 
 	static void NotifyFetchMiss(uint32_t cpu, void* phys, unsigned int size) {
@@ -94,8 +92,7 @@ public:	static struct Req {
 		_Buffer.size=size;
 		_Buffer.epoch=_CpuEpoch;
         _Buffer.time_stamp=(sc_time_stamp().to_seconds())*1000000000;
-		// enqueue request
-		while(!_Q.try_enqueue(_Buffer));
+		_PQ.push(_Buffer);
 	}
 
 	static void NotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {
@@ -105,22 +102,21 @@ public:	static struct Req {
 		_Buffer.phys=phys;
 		_Buffer.size=size;
 		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp=exec + (sc_time_stamp().to_seconds())*1000000000;
+        _Buffer.time_stamp= exec + _epoch_sc_time;
 		_Buffer.tag = tag;
-		while(!_Q.try_enqueue(_Buffer));
+		_PQ.push(_Buffer);
 	}
 	static void FillBiases(uint64_t* ts, uint32_t n) {
 		for (uint32_t i = 0; i < n; i++)
 			ts[i]=0;
 		_CpuEpoch++;
-
+		while(_MemEpoch + EPOCHS <= _CpuEpoch) usleep(1); // stops the iss from running more than EPOCH epochs ahead
 		_Mut[_CpuEpoch%EPOCHS].lock();
-		//fprintf(stderr,"cpu lock mutex %d\n", _CpuEpoch%EPOCHS);
 		for (MainMemCosim* cosim: _Simulators) {
 			cosim->fillBiases(ts, n, _CpuEpoch);
 		}
-		//fprintf(stderr,"cpu unlock mutex %d\n", _CpuEpoch%EPOCHS);
 		_Mut[_CpuEpoch%EPOCHS].unlock();
+		_epoch_sc_time=(sc_time_stamp().to_seconds())*1000000000;
 	}
 
 	static uint64_t GetStat(uint32_t cpu, OuterStat st) {
@@ -166,13 +162,29 @@ private:
 
 	static void* Run(void* unused) {
 		Req k;
+		bool exitLoop=false;
+		uint64_t tmpMemEpoch;
 		while(1){
-			if (_Q.try_dequeue(k)) {
-				_MemEpoch=k.epoch;
-				//fprintf(stderr,"mem locking mutex %d\n", _MemEpoch%EPOCHS);
-				_Mut[_MemEpoch%EPOCHS].lock();
-				//fprintf(stderr,"mem locked mutex %d\n", _MemEpoch%EPOCHS);
+			if(_Stopped) break;
+			tmpMemEpoch = _MemEpoch;
+			while(tmpMemEpoch >= _CpuEpoch){ // Requests ordering needs the iss to run at least one epoch ahead
+				usleep(1);
+				if(_Stopped) break;
+			}
+			if (_PQ.try_pop(k)) {
+				if(tmpMemEpoch != k.epoch){
+					_PQ.push(k);// put the element back
+					_MemEpoch=k.epoch;
+					continue;   // need to check if _MemEpoch < _CpuEpoch
+				}
+				_Mut[tmpMemEpoch%EPOCHS].lock();
 				do {
+					if(tmpMemEpoch != k.epoch){
+						_PQ.push(k);
+						_MemEpoch=k.epoch;
+						exitLoop=true;
+						break;
+					}
 					if(k.device){
 						for (MainMemCosim* cosim: _Simulators) {
 							cosim->IOAccessPtr->insert(k.id,k.write,k.phys,k.size,k.time_stamp,k.tag);
@@ -180,20 +192,14 @@ private:
 					}else{
 						for (MainMemCosim* cosim: _Simulators) {
 							cosim->insert(k.id,k.write,k.fetch,k.phys,k.size,_MemEpoch,k.time_stamp);
-                                                //printf("MainMemCosim::Run::time_stamp=%ld\n", k.time_stamp);
 						}
 					}
-					if(_MemEpoch%EPOCHS != k.epoch%EPOCHS){
-						break;
-					}
-				} while(_Q.try_dequeue(k));
-				//fprintf(stderr,"mem unlocked mutex %d\n", _MemEpoch%EPOCHS);
-				_Mut[_MemEpoch%EPOCHS].unlock();
+				} while(_PQ.try_pop(k));
+				_Mut[tmpMemEpoch%EPOCHS].unlock();
+				if(exitLoop) exitLoop=false;
+				else ++_MemEpoch;
 			}
-
-			if(_Stopped) {
-				break;
-			}
+			else ++_MemEpoch; // an empty epoch!
 		}
 		return NULL;
 	}
@@ -204,7 +210,14 @@ private:
 
 	static bool _Stopped;
 
-	static ReaderWriterQueue<Req,512> _Q;
+	class compare_Req {
+	public:
+    	bool operator()(const Req& u, const Req& v) const {
+			return (u.epoch > v.epoch || (u.epoch == v.epoch && u.time_stamp > v.time_stamp));
+		}
+	};
+	static tbb::concurrent_priority_queue<MainMemCosim::Req, MainMemCosim::compare_Req> _PQ;
+
 	static map<uint32_t, uint64_t*> _Stats[MAX_CPUS];
 
 	static mutex _Mut[EPOCHS];
@@ -213,6 +226,8 @@ private:
 
 	static uint64_t _CpuEpoch;
 	static uint64_t _MemEpoch;
+	static uint64_t _epoch_sc_time;
+
 	IOAccessCosim* IOAccessPtr;
 };
 
