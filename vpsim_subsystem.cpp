@@ -60,6 +60,7 @@ uint64_t MainMemCosim::_CurQuantum=0;
 uint64_t MainMemCosim::_CpuEpoch=0;
 uint64_t MainMemCosim::_MemEpoch=0;
 uint64_t MainMemCosim::_epoch_sc_time=0;
+uint64_t MainMemCosim::_current_time_stamp=0;
 map<void*,bool> StandaloneInstructionCache::Victims;
 int StandaloneInstructionCache::mZero=0;
 int StandaloneInstructionCache::mOne=1;

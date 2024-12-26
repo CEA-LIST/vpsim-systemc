@@ -26,6 +26,7 @@
 #include "CosimExtensions.hpp"
 #include "concurrent_priority_queue.h"
 #include "IOAccessCosim.hpp"
+#include "SesamController.hpp"
 #include <atomic>
 #include <map>
 #include <mutex>
@@ -47,6 +48,13 @@ enum OuterStat {
 	L2_LD,
 	L2_ST
 };
+
+enum NotifyType {
+	CPU=0,
+	DEVICE,
+	SESAMCOMMAND
+};
+
 #define MAX_CPUS 256
 #define DECOUPLED_QUANTUMS 100000
 #define EPOCHS 2 // for the priority_queue to be used correctly, EPOCHS must be higher than 1
@@ -54,7 +62,7 @@ enum OuterStat {
 
 class MainMemCosim {
 public:	static struct Req {
-		bool device; //True for device, false for cpu
+		NotifyType type;
 		void* phys;
 		unsigned int size;// This is how it is defined in SystemC
 		uint32_t id;
@@ -70,33 +78,33 @@ public:	static struct Req {
 
 	virtual ~MainMemCosim() {}
 
-        static void Notify(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size) {
-                //printf("MainMemCosim::notify::exec=%ld\n",exec);
-		_Buffer.device=false;
+    static void Notify(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size) {
+        _current_time_stamp=exec+_epoch_sc_time;
+		_Buffer.type=CPU;
 		_Buffer.id=cpu;
 		_Buffer.write=write;
 		_Buffer.phys=phys;
 		_Buffer.size=size;
 		_Buffer.fetch=0;
 		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp= exec + _epoch_sc_time;
+        _Buffer.time_stamp=_current_time_stamp;
 		_PQ.push(_Buffer);
 	}
 
 	static void NotifyFetchMiss(uint32_t cpu, void* phys, unsigned int size) {
-		_Buffer.device=false;
+		_Buffer.type=CPU;
 		_Buffer.id=cpu;
 		_Buffer.write=0;
 		_Buffer.fetch=1;
 		_Buffer.phys=phys;
 		_Buffer.size=size;
 		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp=(sc_time_stamp().to_seconds())*1000000000;
+        _Buffer.time_stamp=_current_time_stamp;
 		_PQ.push(_Buffer);
 	}
 
 	static void NotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {
-		_Buffer.device=true;
+		_Buffer.type=DEVICE;
 		_Buffer.id=device;
 		_Buffer.write=write;
 		_Buffer.phys=phys;
@@ -106,16 +114,28 @@ public:	static struct Req {
 		_Buffer.tag = tag;
 		_PQ.push(_Buffer);
 	}
+
+	static void NotifySesamCommand(uint64_t counter, bool start) {
+		_Buffer.type=SESAMCOMMAND;
+		_Buffer.tag=counter;
+		_Buffer.write=start; // Reuse of write to indicate a start or finish command 
+ 		_Buffer.epoch=_CpuEpoch;
+		_Buffer.time_stamp=_current_time_stamp;
+ 		_PQ.push(_Buffer);
+ 	}
+
 	static void FillBiases(uint64_t* ts, uint32_t n) {
 		for (uint32_t i = 0; i < n; i++)
 			ts[i]=0;
 		_CpuEpoch++;
-		while(_MemEpoch + EPOCHS <= _CpuEpoch) usleep(1); // stops the iss from running more than EPOCH epochs ahead
-		_Mut[_CpuEpoch%EPOCHS].lock();
-		for (MainMemCosim* cosim: _Simulators) {
-			cosim->fillBiases(ts, n, _CpuEpoch);
+		if(_Simulators.size()){
+			while(_MemEpoch + EPOCHS <= _CpuEpoch) usleep(1); // stops the iss from running more than EPOCH epochs ahead
+			_Mut[_CpuEpoch%EPOCHS].lock();
+			for (MainMemCosim* cosim: _Simulators) {
+				cosim->fillBiases(ts, n, _CpuEpoch);
+			}
+			_Mut[_CpuEpoch%EPOCHS].unlock();
 		}
-		_Mut[_CpuEpoch%EPOCHS].unlock();
 		_epoch_sc_time=(sc_time_stamp().to_seconds())*1000000000;
 	}
 
@@ -138,8 +158,17 @@ public:	static struct Req {
 		}
 	}
 	void setIOAccessPtr(IOAccessCosim* ptr){
-		IOAccessPtr = ptr;
+		_IOAccessPtr = ptr;
 	}
+
+	void setMonitorPtr(SesamController* ptr){
+		_Monitor = ptr;
+ 	}
+
+	sc_time getCurrentTime(){
+		return sc_time((double)_current_time_stamp,SC_NS);
+ 	}
+
 	virtual void insert(uint32_t cpu, uint8_t write, uint8_t fetch, void* phys, unsigned int size, uint64_t epoch, uint64_t time_stamp)=0;
 	virtual void fillBiases(uint64_t* ts, uint32_t n, uint64_t epoch)=0;
 
@@ -162,6 +191,7 @@ private:
 
 	static void* Run(void* unused) {
 		Req k;
+		vector<string> strParam;
 		bool exitLoop=false;
 		uint64_t tmpMemEpoch;
 		while(1){
@@ -185,14 +215,24 @@ private:
 						exitLoop=true;
 						break;
 					}
-					if(k.device){
+					if(k.type==DEVICE){
 						for (MainMemCosim* cosim: _Simulators) {
-							cosim->IOAccessPtr->insert(k.id,k.write,k.phys,k.size,k.time_stamp,k.tag);
+							cosim->_IOAccessPtr->insert(k.id,k.write,k.phys,k.size,k.time_stamp,k.tag);
 						}
-					}else{
+					}else if(k.type==CPU){
 						for (MainMemCosim* cosim: _Simulators) {
 							cosim->insert(k.id,k.write,k.fetch,k.phys,k.size,_MemEpoch,k.time_stamp);
 						}
+					}
+					else if(k.type==SESAMCOMMAND){
+						for (MainMemCosim* cosim: _Simulators) {
+							strParam.clear();
+							if(k.write)	strParam.push_back("StartCapture"); 
+							else		strParam.push_back("EndCapture"); 
+							cosim->_Monitor->sesamCommand(strParam, k.tag);
+						}
+						exitLoop=true;
+						break;
 					}
 				} while(_PQ.try_pop(k));
 				_Mut[tmpMemEpoch%EPOCHS].unlock();
@@ -227,8 +267,10 @@ private:
 	static uint64_t _CpuEpoch;
 	static uint64_t _MemEpoch;
 	static uint64_t _epoch_sc_time;
+	static uint64_t _current_time_stamp;
 
-	IOAccessCosim* IOAccessPtr;
+	IOAccessCosim* _IOAccessPtr;
+	SesamController* _Monitor;
 };
 
 class SystemCCosimulator: public sc_module, public MainMemCosim {

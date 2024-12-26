@@ -479,6 +479,7 @@ public:
 private:
 	SystemCCosimulator* mModulePtr;
 	friend struct DynamicIOAccessCosimulator;
+	friend struct DynamicSesamController;
 };
 
 struct DynamicIOAccessCosimulator
@@ -1247,6 +1248,7 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
                              getAttrAsUInt64("is_home"),
                              getAttrAsUInt64("is_coherent"));
       setId(getAttrAsUInt64("id"));
+	  setDelayStatCapture(true);
       if (getAttrAsUInt64("local")) {
         mModulePtr->setIsPriv(true);
 		//IOAccessCosim::RegStat(getAttrAsUInt64("cpu"), IOACCESS_READ,   &mModulePtr->WriteBacks);
@@ -1650,6 +1652,7 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
 					 getAttrAsUInt64("memory_word_length"),
                      getAttrAsUInt64("is_coherent"),
 					 getAttrAsUInt64("interleave_length"));
+	   setDelayStatCapture(true);
        if (!getAttrAsUInt64("is_mesh")) {
          mModulePtr->set_is_mesh(false);
          //mModulePtr->set_latency(sc_time(getAttrAsUInt64("latency"), SC_PS));
@@ -2189,6 +2192,7 @@ struct DynamicMemory
 		mModulePtr = new memory ( getName().c_str(),
 				getAttrAsUInt64("size") );
 
+		setDelayStatCapture(true);
 		mModulePtr->setBaseAddress(getAttrAsUInt64("base_address"));
 		//mModulePtr->setCycleDuration(sc_time(getAttrAsUInt64("cycle_duration"), SC_PS));
 		mModulePtr->setCycleDuration(sc_time(getAttrAsUInt64("cycle_duration"), SC_NS));
@@ -2899,6 +2903,8 @@ private:
 	static bool InstanceExists;
 	bool mValid;
 
+	SystemCCosimulator* MainMemPtr;
+
 	// benchmarking data
 	string appName;
 	bool mInBenchmark;
@@ -2926,6 +2932,7 @@ public:
     		mValid=false;
     	mInBenchmark=false;
     	//dont_initialize();
+		MainMemPtr=nullptr;
     }
 
     SC_HAS_PROCESS(DynamicSesamController);
@@ -3001,20 +3008,76 @@ public:
     	return argv;
     }
 
+	virtual void finalize() {
+		VpsimIp* ip = VpsimIp::Find("SystemCCosim0"); 
+		if(ip){
+			DynamicSystemCCosimulator* cosim=dynamic_cast<DynamicSystemCCosimulator*>(ip);
+			MainMemPtr = cosim->mModulePtr;
+       		cosim->mModulePtr->setMonitorPtr(this);
+		};
+	}
 
-    void sesamCommand(vector<string> &args) override {
+	// Attention: 'counter' manages only one domain, mCurrentDomain and mBenchDomain are then equal
+	void sesamCommand(vector<string> &args, size_t counter) override{
+		if(counter){    // counter != 0 when sesamComand is called by MainMem
+			string cmd = args.at(0);
+            if (cmd == "StartCapture") {
+				VpsimIp::MapIf(
+                                [this](VpsimIp* ip) { 	return (ip->getAttrAsUInt64("domain")==this->mCurrentDomain && ip->getDelayStatCapture());}, // Delayed IPs
+                                [this](VpsimIp* ip) {
+                                            ip->pushStats();
+                            	}
+                );
+			}
+			else if(cmd == "EndCapture"){
+				string outputBuffer;
+				VpsimIp::MapIf(
+								[this](VpsimIp* ip) {	return (ip->getAttrAsUInt64("domain")==this->mBenchDomain && ip->getDelayStatCapture());}, // Delayed IPs
+								[this,&outputBuffer](VpsimIp* ip) {
+										ip->pushStats();
+										auto &stats = ip->getSegStats().back();
+										if (stats.size()) {
+												outputBuffer += "-----------------------------------\n";
+												outputBuffer += "\nStatistics from ";
+												outputBuffer += ip->getName() + "\n";
+												for (auto& stat: stats) {
+													outputBuffer += "\t";
+													outputBuffer += stat.first + " = ";
+													outputBuffer += stat.second + "\n";
+												}
+												ip->clearSegStats();
+										}
+								}
+				);
+				std::FILE* LogFile = fopen((std::string("sesamBench_")+ appName +std::string("_")+std::to_string(counter-1) +".log").c_str(), "a");
+				fprintf(LogFile,"%s",outputBuffer.c_str());
+				fclose(LogFile);
+				delayedCaptureRunning = false;
+			}
+		}
+		else
         switch(mState) {
             case RUN: {
                 if (mInBenchmark) {
                     mInBenchmark=false;
+					sc_time diff;
+					if(MainMemPtr){
+						MainMemPtr->NotifySesamCommand(nbCommandCounter+1, false);
+						diff = MainMemPtr->getCurrentTime() - mBenchStartTime;
+					}
+					else diff = sc_time_stamp() - mBenchStartTime;
                     // get and display stats
                     //printf("Checking all IPs of domain %ld\n", this->mBenchDomain);
                     fflush(stdout);
                     mCommandOutputBuffer=string();
+					stringstream ss;
+                    ss<<diff;
+                    mCommandOutputBuffer += "Simulated time: ";
+                    mCommandOutputBuffer += ss.str() + "\n";
                     VpsimIp::MapIf(
                                     [this](VpsimIp* ip) {
                     					//printf("ip %s is of domain %ld\n", ip->getName().c_str(),ip->getAttrAsUInt64("domain"));
-                                    	return ip->getAttrAsUInt64("domain")==this->mBenchDomain;
+										return (ip->getAttrAsUInt64("domain")==this->mBenchDomain && !ip->getDelayStatCapture()); // Non delayed IPs
                     				},
                                     [this](VpsimIp* ip) {
                                             // Go back to fast mode !
@@ -3045,11 +3108,6 @@ public:
                                             }
                             }
                     );
-                    sc_time diff = sc_time_stamp() - mBenchStartTime;
-                    stringstream ss;
-                    ss<<diff;
-                    mCommandOutputBuffer += "Simulated time: ";
-                    mCommandOutputBuffer += ss.str() + "\n";
 					std::FILE* LogFile = fopen((std::string("sesamBench_")+ appName +std::string("_")+std::to_string(nbCommandCounter++) +".log").c_str(), "w");
 					fprintf(LogFile,"%s",mCommandOutputBuffer.c_str());
 					fclose(LogFile);
@@ -3234,9 +3292,19 @@ public:
                             printf("Usage: benchmark app\n");
                             return;
                     }
+					if(delayedCaptureRunning){ // Tests did not show any occurrence of overlapping "sesam benchmark" commands 
+						fprintf(stderr, "Wait for the previous benchmark counters to be captured entirely!\n");
+						return;
+					}
+					if(MainMemPtr){
+						delayedCaptureRunning = true;
+						MainMemPtr->NotifySesamCommand(nbCommandCounter+1, true);
+						mBenchStartTime=MainMemPtr->getCurrentTime();
+					}
+					else mBenchStartTime=sc_time_stamp();
                     // First, create a new stats segment
                     VpsimIp::MapIf(
-                                    [this](VpsimIp* ip) { return ip->getAttrAsUInt64("domain")==this->mCurrentDomain; }, // all IPs
+                                    [this](VpsimIp* ip) { return (ip->getAttrAsUInt64("domain")==this->mCurrentDomain && !ip->getDelayStatCapture()); }, // Non delayed IPs
                                     [](VpsimIp* ip) {
                                             // Enable access simulation to all IPs
                                             /*if (ip->isMemoryMapped()) {
@@ -3252,7 +3320,6 @@ public:
                     appName = args.at(1);
                     mInBenchmark=true;
                     mBenchDomain=mCurrentDomain;
-                    mBenchStartTime=sc_time_stamp();
                     fprintf(stderr, "Benchmark mode started.\n");
                 }
             }

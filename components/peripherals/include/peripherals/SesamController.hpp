@@ -36,7 +36,7 @@ namespace vpsim {
             sesamState = state;
         }
 
-        virtual void sesamCommand(vector<string> &args) {};
+        virtual void sesamCommand(vector<string> &args, size_t counter=0) {};
 
     private:
         monitorState * sesamState;
@@ -48,6 +48,7 @@ namespace vpsim {
 
         size_t nbCommandCounter=0; //used to increment fileName id. For instance: sesamBench_0, sesamBench_1,...
                                  //It is not a static variable, so not adapted if there are multiple instances of sesamController
+        bool delayedCaptureRunning=false; // Precaution for sesam benchmark commands overlapping
     };
 }
 

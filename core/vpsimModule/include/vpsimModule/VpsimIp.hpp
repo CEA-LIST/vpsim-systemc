@@ -51,7 +51,8 @@ public:
 	VpsimIp(std::string name)
 	 : mName(name),
 	   mInPortCounter(0),
-	   mOutPortCounter(0)
+	   mOutPortCounter(0),
+	   delayStatCapture(false)
 	{
 		registerRequiredAttribute("domain");
 	}
@@ -549,6 +550,8 @@ public:
 	std::vector<std::map<std::string, std::string>>&
 		getSegStats() { return mSegmentedStats; }
         void clearSegStats() { mSegmentedStats.clear(); }
+		void setDelayStatCapture(bool toDelay) 	{ delayStatCapture=toDelay; }
+		bool getDelayStatCapture() 				{ return delayStatCapture; }
 
 protected:
 	std::string mName;
@@ -592,6 +595,7 @@ private:
 
     static constexpr bool useDmiSettings = false;
 	int mId = -1;
+	bool delayStatCapture;
 };
 
 template<typename InPortType, typename OutPortType>
