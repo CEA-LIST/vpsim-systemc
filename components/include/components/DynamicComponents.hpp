@@ -421,6 +421,7 @@ public:
 		VpsimIp(name),
 	    mModulePtr(nullptr) {
 		registerRequiredAttribute("n_out_ports");
+		registerOptionalAttribute("roi_only","1");
 	}
 
 
@@ -449,6 +450,8 @@ public:
 		checkAttributes();
 		mModulePtr = new SystemCCosimulator (sc_module_name(getName().c_str()),
 				getAttrAsUInt64("n_out_ports"));
+
+		mModulePtr->setFocusOnROI(getAttrAsUInt64("roi_only"));
 
 		unsigned cpu=0;
 		for (cpu=0; cpu < getAttrAsUInt64("n_out_ports"); cpu++) {

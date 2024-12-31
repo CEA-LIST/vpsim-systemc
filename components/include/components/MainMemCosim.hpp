@@ -56,6 +56,7 @@ enum NotifyType {
 };
 
 #define MAX_CPUS 256
+#define MAX_QUANTUM 0xFFFF
 #define DECOUPLED_QUANTUMS 100000
 #define EPOCHS 2 // for the priority_queue to be used correctly, EPOCHS must be higher than 1
 
@@ -78,50 +79,40 @@ public:	static struct Req {
 
 	virtual ~MainMemCosim() {}
 
-    static void Notify(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size) {
-        _current_time_stamp=exec+_epoch_sc_time;
-		_Buffer.type=CPU;
-		_Buffer.id=cpu;
-		_Buffer.write=write;
-		_Buffer.phys=phys;
-		_Buffer.size=size;
-		_Buffer.fetch=0;
-		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp=_current_time_stamp;
-		_PQ.push(_Buffer);
-	}
+	typedef void (*notifyFunctionType)(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size);
+	static notifyFunctionType Notify;
+	static void haltNotify(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size) {_current_time_stamp=exec+_epoch_sc_time;}
 
-	static void NotifyFetchMiss(uint32_t cpu, void* phys, unsigned int size) {
-		_Buffer.type=CPU;
-		_Buffer.id=cpu;
-		_Buffer.write=0;
-		_Buffer.fetch=1;
-		_Buffer.phys=phys;
-		_Buffer.size=size;
-		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp=_current_time_stamp;
-		_PQ.push(_Buffer);
-	}
+	typedef void (*notifyFetchMissFunctionType)(uint32_t cpu, void* phys, unsigned int size);
+	static notifyFetchMissFunctionType NotifyFetchMiss;
+	static void haltNotifyFetchMiss(uint32_t cpu, void* phys, unsigned int size) {}
 
-	static void NotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {
-		_Buffer.type=DEVICE;
-		_Buffer.id=device;
-		_Buffer.write=write;
-		_Buffer.phys=phys;
-		_Buffer.size=size;
-		_Buffer.epoch=_CpuEpoch;
-        _Buffer.time_stamp= exec + _epoch_sc_time;
-		_Buffer.tag = tag;
-		_PQ.push(_Buffer);
-	}
+	typedef void (*notifyIOFunctionType)(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag);
+	static notifyIOFunctionType NotifyIO;
+	static void haltNotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {}
 
 	static void NotifySesamCommand(uint64_t counter, bool start) {
 		_Buffer.type=SESAMCOMMAND;
 		_Buffer.tag=counter;
 		_Buffer.write=start; // Reuse of write to indicate a start or finish command 
  		_Buffer.epoch=_CpuEpoch;
-		_Buffer.time_stamp=_current_time_stamp;
- 		_PQ.push(_Buffer);
+		if(start) {
+			if(_focusOnROI){
+				Notify=proceedNotify;
+				NotifyIO=proceedNotifyIO;
+				NotifyFetchMiss=proceedNotifyFetchMiss;
+			}
+			_Buffer.time_stamp=_epoch_sc_time - 1;
+		}	
+		else {
+			if(_focusOnROI){
+				Notify=haltNotify;
+				NotifyIO=haltNotifyIO;
+				NotifyFetchMiss=haltNotifyFetchMiss;
+			}
+			_Buffer.time_stamp=_epoch_sc_time + MAX_QUANTUM + 1;
+		}	
+		_PQ.push(_Buffer);
  	}
 
 	static void FillBiases(uint64_t* ts, uint32_t n) {
@@ -165,6 +156,20 @@ public:	static struct Req {
 		_Monitor = ptr;
  	}
 
+	void setFocusOnROI(bool focusOnROI){
+		_focusOnROI = focusOnROI;
+		if(_focusOnROI){
+				Notify=haltNotify;
+				NotifyIO=haltNotifyIO;
+				NotifyFetchMiss=haltNotifyFetchMiss;
+		}
+		else {
+				Notify=proceedNotify;
+				NotifyIO=proceedNotifyIO;
+				NotifyFetchMiss=proceedNotifyFetchMiss;
+		}
+ 	}
+
 	sc_time getCurrentTime(){
 		return sc_time((double)_current_time_stamp,SC_NS);
  	}
@@ -173,6 +178,43 @@ public:	static struct Req {
 	virtual void fillBiases(uint64_t* ts, uint32_t n, uint64_t epoch)=0;
 
 private:
+
+	static void proceedNotify(uint32_t cpu, uint64_t exec, uint8_t write, void* phys, unsigned int size) {
+        _current_time_stamp=exec+_epoch_sc_time;
+		_Buffer.type=CPU;
+		_Buffer.id=cpu;
+		_Buffer.write=write;
+		_Buffer.phys=phys;
+		_Buffer.size=size;
+		_Buffer.fetch=0;
+		_Buffer.epoch=_CpuEpoch;
+		_Buffer.time_stamp=_current_time_stamp;
+		_PQ.push(_Buffer);
+	}
+
+	static void proceedNotifyFetchMiss(uint32_t cpu, void* phys, unsigned int size) {
+		_Buffer.type=CPU;
+		_Buffer.id=cpu;
+		_Buffer.write=0;
+		_Buffer.fetch=1;
+		_Buffer.phys=phys;
+		_Buffer.size=size;
+		_Buffer.epoch=_CpuEpoch;
+		_Buffer.time_stamp=_current_time_stamp;
+		_PQ.push(_Buffer);
+	}
+
+	static void proceedNotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {
+		_Buffer.type=DEVICE;
+		_Buffer.id=device;
+		_Buffer.write=write;
+		_Buffer.phys=phys;
+		_Buffer.size=size;
+		_Buffer.epoch=_CpuEpoch;
+		_Buffer.time_stamp=exec + _epoch_sc_time;
+		_Buffer.tag = tag;
+		_PQ.push(_Buffer);
+	}
 
 	static void Add(MainMemCosim* simulator) {
 		if(!_Inited) {
@@ -269,6 +311,8 @@ private:
 	static uint64_t _epoch_sc_time;
 	static uint64_t _current_time_stamp;
 
+	static bool _focusOnROI;
+	
 	IOAccessCosim* _IOAccessPtr;
 	SesamController* _Monitor;
 };
