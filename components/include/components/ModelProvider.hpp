@@ -149,6 +149,7 @@ namespace vpsim {
     typedef void (*modelprovider_cpu_get_stats_t)(int index, uint32_t*, void**);
     typedef void (*modelprovider_show_cpu_t)(void* handle);
     typedef void (*modelprovider_register_main_mem_callback_t)(MainMemCb);
+    typedef void (*modelprovider_unregister_main_mem_callback_t)(void);
     typedef void (*modelprovider_register_outer_stat_cb_t)(OuterStatGetter);
     typedef void (*modelprovider_register_fill_bias_cb_t)(FillBiasCb);
 
@@ -186,6 +187,7 @@ namespace vpsim {
             LDFCT(modelprovider_cpu_get_stats, get_stats);
             LDFCT(modelprovider_show_cpu, show_cpu);
             LDFCT(modelprovider_register_main_mem_callback, modelprovider_register_main_mem_callback);
+            LDFCT(modelprovider_unregister_main_mem_callback, modelprovider_unregister_main_mem_callback);
             LDFCT(modelprovider_register_outer_stat_cb, modelprovider_register_outer_stat_cb);
             LDFCT(modelprovider_register_fill_bias_cb, modelprovider_register_fill_bias_cb);
             LDFCT(modelprovider_register_icache_miss_cb, modelprovider_register_icache_miss_cb);
@@ -321,6 +323,7 @@ namespace vpsim {
         modelprovider_show_cpu_t show_cpu;
 
         modelprovider_register_main_mem_callback_t modelprovider_register_main_mem_callback;
+        modelprovider_unregister_main_mem_callback_t modelprovider_unregister_main_mem_callback;
         modelprovider_register_outer_stat_cb_t modelprovider_register_outer_stat_cb;
         modelprovider_register_fill_bias_cb_t modelprovider_register_fill_bias_cb;
         modelprovider_register_icache_miss_cb_t modelprovider_register_icache_miss_cb;
@@ -937,6 +940,7 @@ namespace vpsim {
             registerRequiredAttribute("path");
             registerRequiredAttribute("io_poll_period");
             registerRequiredAttribute("notify_main_memory_access");
+            registerOptionalAttribute("roi_only","1");
 
 
             registerRequiredAttribute("simulate_icache");
@@ -974,7 +978,8 @@ namespace vpsim {
             mModulePtr->modelprovider_register_fill_bias_cb(&ModelProvider::get_cpu_biases);
 
             if (getAttrAsUInt64("notify_main_memory_access")) {
-                mModulePtr->modelprovider_register_main_mem_callback(model_provider_main_mem_cb);
+                if (!getAttrAsUInt64("roi_only")) mModulePtr->modelprovider_register_main_mem_callback(model_provider_main_mem_cb);
+                else MainMemCosim::addRegisterMainMemCb(mModulePtr->modelprovider_register_main_mem_callback, model_provider_main_mem_cb, mModulePtr->modelprovider_unregister_main_mem_callback);
                 mModulePtr->modelprovider_register_outer_stat_cb(model_provider_outer_stat_cb);
             }
 

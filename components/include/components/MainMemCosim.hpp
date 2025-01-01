@@ -91,6 +91,10 @@ public:	static struct Req {
 	static notifyIOFunctionType NotifyIO;
 	static void haltNotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {}
 
+	typedef void (*model_provider_main_mem_cb)(void* opaque, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size);
+	typedef void (*registerMainMemCb)(model_provider_main_mem_cb);
+	typedef void (*unRegisterMainMemCb)(void);
+
 	static void NotifySesamCommand(uint64_t counter, bool start) {
 		_Buffer.type=SESAMCOMMAND;
 		_Buffer.tag=counter;
@@ -101,11 +105,13 @@ public:	static struct Req {
 				Notify=proceedNotify;
 				NotifyIO=proceedNotifyIO;
 				NotifyFetchMiss=proceedNotifyFetchMiss;
+				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<0>(_MainMemCb[i])(get<1>(_MainMemCb[i]));
 			}
 			_Buffer.time_stamp=_epoch_sc_time - 1;
 		}	
 		else {
 			if(_focusOnROI){
+				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<2>(_MainMemCb[i])();
 				Notify=haltNotify;
 				NotifyIO=haltNotifyIO;
 				NotifyFetchMiss=haltNotifyFetchMiss;
@@ -119,7 +125,7 @@ public:	static struct Req {
 		for (uint32_t i = 0; i < n; i++)
 			ts[i]=0;
 		_CpuEpoch++;
-		if(_Simulators.size()){
+		if(Notify!=haltNotify){
 			while(_MemEpoch + EPOCHS <= _CpuEpoch) usleep(1); // stops the iss from running more than EPOCH epochs ahead
 			_Mut[_CpuEpoch%EPOCHS].lock();
 			for (MainMemCosim* cosim: _Simulators) {
@@ -170,7 +176,12 @@ public:	static struct Req {
 		}
  	}
 
+	static void addRegisterMainMemCb(registerMainMemCb ptrRegisterMainMemCb, model_provider_main_mem_cb ptrModelProviderMainMemCb, unRegisterMainMemCb ptrUnRegisterMainMemCb){
+		_MainMemCb.push_back(make_tuple(ptrRegisterMainMemCb,ptrModelProviderMainMemCb,ptrUnRegisterMainMemCb));
+	}
+
 	sc_time getCurrentTime(){
+		if(_focusOnROI)	return sc_time_stamp();
 		return sc_time((double)_current_time_stamp,SC_NS);
  	}
 
@@ -315,6 +326,7 @@ private:
 	
 	IOAccessCosim* _IOAccessPtr;
 	SesamController* _Monitor;
+	static vector<tuple<registerMainMemCb, model_provider_main_mem_cb, unRegisterMainMemCb>> _MainMemCb;
 };
 
 class SystemCCosimulator: public sc_module, public MainMemCosim {
