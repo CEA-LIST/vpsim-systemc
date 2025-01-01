@@ -1497,22 +1497,23 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
          }*/
 
 
-	   auto totalDistance = to_string(mModulePtr->getTotalDistance() - stoull(back.at(distanceKey)));
-	   auto packetsCount  = to_string(mModulePtr->getPacketsCount() - stoull(back.at(packetsKey)));
-	   newMap[distanceKey] = totalDistance;
-	   newMap[packetsKey]  = packetsCount;
-           if(!getAttrAsUInt64("with_contention")){
-	     auto totalLatency  = to_string((mModulePtr->getTotalLatency()).to_seconds()*ns_per_sec - stoull(back.at(latencyKey)));
-	     newMap[latencyKey]  = totalLatency;
-           }
-	   if(getAttrAsUInt64("with_contention")){
-             auto TotalLatencyContention  = to_string((mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec - stoull(back.at(totallatencyKey)));
-	     auto AverageLatency = to_string((double)(stoull(TotalLatencyContention)/(double)(stoull(packetsCount))));
-             //auto TotalLatencyContention  = to_string((mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec);
-	     //printf("TotalLatencyContention=%d\n", (mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec -stoull(back.at(totallatencyKey)));
-             newMap[totallatencyKey]  = TotalLatencyContention;
-             newMap[averagelatencyKey]  = AverageLatency;
-			 //NoC stats per Router
+		auto totalDistance = to_string(mModulePtr->getTotalDistance() - stoull(back.at(distanceKey)));
+		auto packetsCount  = to_string(mModulePtr->getPacketsCount() - stoull(back.at(packetsKey)));
+		newMap[distanceKey] = totalDistance;
+		newMap[packetsKey]  = packetsCount;
+        if(!getAttrAsUInt64("with_contention")){
+	    	auto totalLatency  = to_string((mModulePtr->getTotalLatency()).to_seconds()*ns_per_sec - stoull(back.at(latencyKey)));
+	    	newMap[latencyKey]  = totalLatency;
+        }
+		if(getAttrAsUInt64("with_contention")){
+			double totlat = (mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec - stoull(back.at(totallatencyKey));
+		 	double avgLat = 0.0;
+		 	if(stoull(packetsCount)) avgLat = totlat/stoull(packetsCount);
+	     	auto AverageLatency = to_string(avgLat);
+		 	auto TotalLatencyContention = to_string(totlat);
+            newMap[totallatencyKey]  = TotalLatencyContention;
+            newMap[averagelatencyKey]  = AverageLatency;
+			//NoC stats per Router
 			for (size_t j = 0; j < getAttrAsUInt64("mesh_y"); j++)
 			{
 				for (size_t i = 0; i < getAttrAsUInt64("mesh_x"); i++)
@@ -1521,7 +1522,7 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
 					newMap[string("Router(")+tostr(i)+string(",")+tostr(j)+string(")_")+string("Contention")] = tostr((mModulePtr->getRouterTotalLatency(i,j)).to_seconds()*ns_per_sec - stod(back.at(string("Router(")+tostr(i)+string(",")+tostr(j)+string(")_")+string("Contention"))));
 				}
 			}
-	   }
+		}
 		for (size_t i = 0; i < mModulePtr->getMMappedSize(); ++i)
 		{
 			std::pair<size_t,size_t> pos = mModulePtr->getMMappedPos(i);
@@ -1582,7 +1583,8 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
                  if(getAttrAsUInt64("with_contention")){
 		   double totlat=(mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec;
                    mStats[string("Total_Latency")]  = tostr(totlat) + " ns";
-                   double avgLat= totlat/(mModulePtr->getPacketsCount());
+				   double avgLat = 0.0;
+				   if(mModulePtr->getPacketsCount()) avgLat = totlat/(mModulePtr->getPacketsCount());
                    //mStats[string("Total_Latency")]  = tostr((mModulePtr->getTotalLatencyWithContention()).to_seconds()*ns_per_sec) + " ns";
                    //double avgLat= ((mModulePtr->getTotalLatencyWithContention().to_seconds())*ns_per_sec)/(mModulePtr->getPacketsCount());
                    mStats[string("Average_Latency")]  = tostr(avgLat) + " ns";
