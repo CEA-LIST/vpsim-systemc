@@ -64,7 +64,7 @@ uint64_t MainMemCosim::_current_time_stamp=0;
 MainMemCosim::notifyFunctionType MainMemCosim::Notify=MainMemCosim::haltNotify;
 MainMemCosim::notifyFetchMissFunctionType MainMemCosim::NotifyFetchMiss=MainMemCosim::haltNotifyFetchMiss;
 MainMemCosim::notifyIOFunctionType MainMemCosim::NotifyIO=MainMemCosim::haltNotifyIO;
-vector<tuple<MainMemCosim::registerMainMemCb, MainMemCosim::model_provider_main_mem_cb, MainMemCosim::unRegisterMainMemCb>> MainMemCosim::_MainMemCb;
+vector<tuple<MainMemCosim::registerMainMemCb, MainMemCosim::model_provider_main_mem_cb, uint64_t, MainMemCosim::unRegisterMainMemCb>> MainMemCosim::_MainMemCb;
 bool MainMemCosim::_focusOnROI=false;
 map<void*,bool> StandaloneInstructionCache::Victims;
 int StandaloneInstructionCache::mZero=0;

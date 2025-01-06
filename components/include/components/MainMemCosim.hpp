@@ -92,7 +92,7 @@ public:	static struct Req {
 	static void haltNotifyIO(uint32_t device, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size, uint64_t tag) {}
 
 	typedef void (*model_provider_main_mem_cb)(void* opaque, uint64_t exec, uint8_t write, void* phys, uint64_t virt, unsigned int size);
-	typedef void (*registerMainMemCb)(model_provider_main_mem_cb);
+	typedef void (*registerMainMemCb)(model_provider_main_mem_cb, uint64_t);
 	typedef void (*unRegisterMainMemCb)(void);
 
 	static void NotifySesamCommand(uint64_t counter, bool start) {
@@ -105,13 +105,13 @@ public:	static struct Req {
 				Notify=proceedNotify;
 				NotifyIO=proceedNotifyIO;
 				NotifyFetchMiss=proceedNotifyFetchMiss;
-				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<0>(_MainMemCb[i])(get<1>(_MainMemCb[i]));
+				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<0>(_MainMemCb[i])(get<1>(_MainMemCb[i]),get<2>(_MainMemCb[i]));
 			}
 			_Buffer.time_stamp=_epoch_sc_time - 1;
 		}	
 		else {
 			if(_focusOnROI){
-				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<2>(_MainMemCb[i])();
+				for (size_t i = 0; i < _MainMemCb.size(); i++)	get<3>(_MainMemCb[i])();
 				Notify=haltNotify;
 				NotifyIO=haltNotifyIO;
 				NotifyFetchMiss=haltNotifyFetchMiss;
@@ -176,8 +176,8 @@ public:	static struct Req {
 		}
  	}
 
-	static void addRegisterMainMemCb(registerMainMemCb ptrRegisterMainMemCb, model_provider_main_mem_cb ptrModelProviderMainMemCb, unRegisterMainMemCb ptrUnRegisterMainMemCb){
-		_MainMemCb.push_back(make_tuple(ptrRegisterMainMemCb,ptrModelProviderMainMemCb,ptrUnRegisterMainMemCb));
+	static void addRegisterMainMemCb(registerMainMemCb ptrRegisterMainMemCb, model_provider_main_mem_cb ptrModelProviderMainMemCb, uint64_t quantum, unRegisterMainMemCb ptrUnRegisterMainMemCb){
+		_MainMemCb.push_back(make_tuple(ptrRegisterMainMemCb,ptrModelProviderMainMemCb,quantum,ptrUnRegisterMainMemCb));
 	}
 
 	sc_time getCurrentTime(){
@@ -326,7 +326,7 @@ private:
 	
 	IOAccessCosim* _IOAccessPtr;
 	SesamController* _Monitor;
-	static vector<tuple<registerMainMemCb, model_provider_main_mem_cb, unRegisterMainMemCb>> _MainMemCb;
+	static vector<tuple<registerMainMemCb, model_provider_main_mem_cb, uint64_t, unRegisterMainMemCb>> _MainMemCb;
 };
 
 class SystemCCosimulator: public sc_module, public MainMemCosim {

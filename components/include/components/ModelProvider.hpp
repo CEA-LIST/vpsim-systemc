@@ -148,7 +148,7 @@ namespace vpsim {
 
     typedef void (*modelprovider_cpu_get_stats_t)(int index, uint32_t*, void**);
     typedef void (*modelprovider_show_cpu_t)(void* handle);
-    typedef void (*modelprovider_register_main_mem_callback_t)(MainMemCb);
+    typedef void (*modelprovider_register_main_mem_callback_t)(MainMemCb, uint64_t);
     typedef void (*modelprovider_unregister_main_mem_callback_t)(void);
     typedef void (*modelprovider_register_outer_stat_cb_t)(OuterStatGetter);
     typedef void (*modelprovider_register_fill_bias_cb_t)(FillBiasCb);
@@ -164,7 +164,7 @@ namespace vpsim {
 
     struct ModelProvider : public sc_module, public InterruptIf {
 
-        ModelProvider(sc_module_name name, string path, uint64_t poll_period) : sc_module(name), configured(false), poll_period(poll_period) {
+        ModelProvider(sc_module_name name, string path, uint64_t poll_period, uint64_t quantum = 1000) : sc_module(name), configured(false), poll_period(poll_period), quantum(quantum) {
             lib = dlopen(path.c_str(), RTLD_LOCAL | RTLD_LAZY);
 
             if (!lib) {
@@ -290,6 +290,7 @@ namespace vpsim {
         bool configured;
         sc_event check_io_event;
         uint64_t poll_period;
+        uint64_t quantum;
 
         sc_event big_mutex;
         sc_event sysc_event;
@@ -939,6 +940,7 @@ namespace vpsim {
 
             registerRequiredAttribute("path");
             registerRequiredAttribute("io_poll_period");
+            registerOptionalAttribute("quantum","1000");
             registerRequiredAttribute("notify_main_memory_access");
             registerOptionalAttribute("roi_only","1");
 
@@ -967,7 +969,7 @@ namespace vpsim {
                 throw runtime_error("make() already called for DynamicArm");
             }
             checkAttributes();
-            mModulePtr = new ModelProvider(getName().c_str(), getAttr("path"), getAttrAsUInt64("io_poll_period"));
+            mModulePtr = new ModelProvider(getName().c_str(), getAttr("path"), getAttrAsUInt64("io_poll_period"), getAttrAsUInt64("quantum"));
 
 
             mModulePtr->set_default_read_callback(model_provider_read_cb);
@@ -978,8 +980,8 @@ namespace vpsim {
             mModulePtr->modelprovider_register_fill_bias_cb(&ModelProvider::get_cpu_biases);
 
             if (getAttrAsUInt64("notify_main_memory_access")) {
-                if (!getAttrAsUInt64("roi_only")) mModulePtr->modelprovider_register_main_mem_callback(model_provider_main_mem_cb);
-                else MainMemCosim::addRegisterMainMemCb(mModulePtr->modelprovider_register_main_mem_callback, model_provider_main_mem_cb, mModulePtr->modelprovider_unregister_main_mem_callback);
+                if (!getAttrAsUInt64("roi_only")) mModulePtr->modelprovider_register_main_mem_callback(model_provider_main_mem_cb, mModulePtr->quantum);
+                else MainMemCosim::addRegisterMainMemCb(mModulePtr->modelprovider_register_main_mem_callback, model_provider_main_mem_cb, mModulePtr->quantum, mModulePtr->modelprovider_unregister_main_mem_callback);
                 mModulePtr->modelprovider_register_outer_stat_cb(model_provider_outer_stat_cb);
             }
 
