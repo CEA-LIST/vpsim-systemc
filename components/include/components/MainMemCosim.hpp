@@ -121,7 +121,7 @@ public:	static struct Req {
 		_PQ.push(_Buffer);
  	}
 
-	static void FillBiases(uint64_t* ts, uint32_t n) {
+	static void FillBiases(uint64_t* ts, uint32_t n, double conversion_factor = 1.0) {
 		for (uint32_t i = 0; i < n; i++)
 			ts[i]=0;
 		_CpuEpoch++;
@@ -129,7 +129,7 @@ public:	static struct Req {
 			while(_MemEpoch + EPOCHS <= _CpuEpoch) usleep(1); // stops the iss from running more than EPOCH epochs ahead
 			_Mut[_CpuEpoch%EPOCHS].lock();
 			for (MainMemCosim* cosim: _Simulators) {
-				cosim->fillBiases(ts, n, _CpuEpoch);
+				cosim->fillBiases(ts, n, conversion_factor, _CpuEpoch);
 			}
 			_Mut[_CpuEpoch%EPOCHS].unlock();
 		}
@@ -186,7 +186,7 @@ public:	static struct Req {
  	}
 
 	virtual void insert(uint32_t cpu, uint8_t write, uint8_t fetch, void* phys, unsigned int size, uint64_t epoch, uint64_t time_stamp)=0;
-	virtual void fillBiases(uint64_t* ts, uint32_t n, uint64_t epoch)=0;
+	virtual void fillBiases(uint64_t* ts, uint32_t n, double conversion_factor, uint64_t epoch)=0;
 
 private:
 
@@ -383,9 +383,9 @@ public:
 		pld.clear_extension(&src);
 	}
 
-	virtual void fillBiases(uint64_t* ts, uint32_t n, uint64_t epoch) override {
+	virtual void fillBiases(uint64_t* ts, uint32_t n, double conversion_factor, uint64_t epoch) override {
 		for (uint32_t i = 0; i < n; i++) {
-			ts[i]+=(mTimes[i][epoch%EPOCHS].to_seconds()*1000000000.0);
+			ts[i]+=conversion_factor*(mTimes[i][epoch%EPOCHS].to_seconds()*1000000000.0);
 			mTimes[i][epoch%EPOCHS]=SC_ZERO_TIME;
 		}
 	}

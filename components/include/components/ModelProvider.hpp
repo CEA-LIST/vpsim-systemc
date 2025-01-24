@@ -114,7 +114,7 @@ namespace vpsim {
                         );
 
     typedef uint64_t (*OuterStatGetter)(uint32_t index, enum OuterStat type);
-    typedef void(*FillBiasCb)(uint64_t* ts, int n);
+    typedef void(*FillBiasCb)(uint64_t* ts, int n, double conversion_factor);
 
     typedef void (*IOAccessCb)(uint32_t device, uint64_t exec, uint8_t is_write
                         	, void* phys
@@ -151,7 +151,7 @@ namespace vpsim {
     typedef void (*modelprovider_register_main_mem_callback_t)(MainMemCb, uint64_t);
     typedef void (*modelprovider_unregister_main_mem_callback_t)(void);
     typedef void (*modelprovider_register_outer_stat_cb_t)(OuterStatGetter);
-    typedef void (*modelprovider_register_fill_bias_cb_t)(FillBiasCb);
+    typedef void (*modelprovider_register_fill_bias_cb_t)(FillBiasCb, double);
 
     typedef void (*modelprovider_register_icache_miss_cb_t)(ICacheMissCb);
     typedef void (*modelprovider_register_add_victim_cb_t)(AddVictimCb);
@@ -164,7 +164,7 @@ namespace vpsim {
 
     struct ModelProvider : public sc_module, public InterruptIf {
 
-        ModelProvider(sc_module_name name, string path, uint64_t poll_period, uint64_t quantum = 1000) : sc_module(name), configured(false), poll_period(poll_period), quantum(quantum) {
+        ModelProvider(sc_module_name name, string path, uint64_t poll_period, uint64_t quantum = 1000, double conversion_factor = 1.0) : sc_module(name), configured(false), poll_period(poll_period), quantum(quantum), conversion_factor(conversion_factor) {
             lib = dlopen(path.c_str(), RTLD_LOCAL | RTLD_LAZY);
 
             if (!lib) {
@@ -253,8 +253,8 @@ namespace vpsim {
                     * 1000000000);
         }
 
-        static void get_cpu_biases(uint64_t* times, int n) {
-            MainMemCosim::FillBiases(times, n);
+        static void get_cpu_biases(uint64_t* times, int n, double conversion_factor) {
+            MainMemCosim::FillBiases(times, n, conversion_factor);
         }
 
         void wait_unlock() {
@@ -291,6 +291,7 @@ namespace vpsim {
         sc_event check_io_event;
         uint64_t poll_period;
         uint64_t quantum;
+        double conversion_factor;
 
         sc_event big_mutex;
         sc_event sysc_event;
@@ -941,6 +942,7 @@ namespace vpsim {
             registerRequiredAttribute("path");
             registerRequiredAttribute("io_poll_period");
             registerOptionalAttribute("quantum","1000");
+            registerOptionalAttribute("conversion_factor","1.0");
             registerRequiredAttribute("notify_main_memory_access");
             registerOptionalAttribute("roi_only","1");
 
@@ -969,7 +971,7 @@ namespace vpsim {
                 throw runtime_error("make() already called for DynamicArm");
             }
             checkAttributes();
-            mModulePtr = new ModelProvider(getName().c_str(), getAttr("path"), getAttrAsUInt64("io_poll_period"), getAttrAsUInt64("quantum"));
+            mModulePtr = new ModelProvider(getName().c_str(), getAttr("path"), getAttrAsUInt64("io_poll_period"), getAttrAsUInt64("quantum"), stod(getAttr("conversion_factor")));
 
 
             mModulePtr->set_default_read_callback(model_provider_read_cb);
@@ -977,7 +979,7 @@ namespace vpsim {
             mModulePtr->set_sync_callback(model_provider_sync);
             mModulePtr->modelprovider_unlock(model_provider_unlock_cb, (void*) mModulePtr);
             mModulePtr->modelprovider_wait_unlock(model_provider_wait_unlock_cb, (void*) mModulePtr);
-            mModulePtr->modelprovider_register_fill_bias_cb(&ModelProvider::get_cpu_biases);
+            mModulePtr->modelprovider_register_fill_bias_cb(&ModelProvider::get_cpu_biases, mModulePtr->conversion_factor);
 
             if (getAttrAsUInt64("notify_main_memory_access")) {
                 if (!getAttrAsUInt64("roi_only")) mModulePtr->modelprovider_register_main_mem_callback(model_provider_main_mem_cb, mModulePtr->quantum);
