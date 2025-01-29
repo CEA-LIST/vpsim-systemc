@@ -31,23 +31,25 @@ namespace vpsim {
    uint32_t    flitSize,
    uint32_t    wordLengthInByte,
    bool        isCoherent = false,
-   uint32_t    interleaveLength = 0)
+   uint32_t    memoryInterleaveLength = 0,
+   uint32_t    slcInterleaveLength = 0)
     : sc_module       (name)
     , Logger          (string(name))
     , NAME            (string(name))
     , DIAGNOSTIC_LEVEL(DBG_L0)
     , ACCESS_LATENCY  (sc_time(0,SC_NS))
     , ENABLE_LATENCY  (false)
-    , InterleaveLength(interleaveLength)
-    , MWordLengthInByte (wordLengthInByte)
-    , FlitSize        (flitSize)
     , NUM_CACHE_IN    (num_cache_in)
     , NUM_CACHE_OUT   (num_cache_out)
     , NUM_HOME_IN     (num_home_in)
     , NUM_HOME_OUT    (num_home_out)
     , NUM_MMAPPED     (num_mmapped)
     , NUM_DEVICE      (num_device)
+    , FlitSize        (flitSize)
+    , MWordLengthInByte (wordLengthInByte)
     , IsCoherent      (isCoherent)
+    , MemoryInterleaveLength(memoryInterleaveLength)
+    , SLCInterleaveLength(slcInterleaveLength)
   {
     for (unsigned i = 0; i<NUM_CACHE_IN; i++) {
       mCacheSocketsIn.push_back(new tlm_utils::simple_target_socket<CoherenceInterconnect>((string("cache_in_")+to_string(i)).c_str()));
@@ -80,6 +82,13 @@ namespace vpsim {
     RamBaseAddr = UINT64_MAX;
     RamLastAddr = 0x0;
     IndexFirstMemoryController= UINT32_MAX;
+
+
+    if(!MemoryInterleaveLength) get_noc_pos_by_address=&CoherenceInterconnect::get_noc_pos_by_address_without_interleave;
+    else                        get_noc_pos_by_address=&CoherenceInterconnect::get_noc_pos_by_address_with_interleave;
+    if(!SLCInterleaveLength)  get_home_pos_by_address=&CoherenceInterconnect::get_home_pos_by_address_without_interleave;
+    else                      get_home_pos_by_address=&CoherenceInterconnect::get_home_pos_by_address_with_interleave;
+
   }
 
   CoherenceInterconnect::~CoherenceInterconnect() {
@@ -163,11 +172,22 @@ namespace vpsim {
       (*mHomeSocketsOut[0])->b_transport(trans, delay);
       return;
     } else {
-      for (auto it = HomeOutputs.begin(); it != HomeOutputs.end(); ++it)
-        if ((trans.get_address() >= it->base_addr) && (trans.get_address()+trans.get_data_length()-1 <= it->end_addr)) {
-          (*mHomeSocketsOut[it->port])->b_transport(trans, delay);
+      uint64_t addr=trans.get_address();
+      if(SLCInterleaveLength){
+        size_t index=0;
+        if(addr >= RamBaseAddr && addr < RamLastAddr){
+          index = ((addr-RamBaseAddr) /SLCInterleaveLength) % mHomeIDs.size();
+          (*mHomeSocketsOut[index])->b_transport(trans, delay);
           return;
         }
+      }
+      else{
+        for (auto it = HomeOutputs.begin(); it != HomeOutputs.end(); ++it)
+          if ((addr >= it->base_addr) && (addr+trans.get_data_length()-1 <= it->end_addr)) {
+            (*mHomeSocketsOut[it->port])->b_transport(trans, delay);
+            return;
+          }
+      }
       assert (false); //throw runtime_error ("No home found\n");
     }
   }
@@ -310,7 +330,7 @@ namespace vpsim {
   /**
   * @param  index   points the registered memory mapped component
   */
-  CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_noc_pos_by_address (uint64_t addr, size_t& index) {
+  CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_noc_pos_by_address_without_interleave (uint64_t addr, size_t& index) {
     index = 0;
     for (auto& mapping: mAddressIDs){
       if (addr >= get<0>(mapping) && addr < get<1>(mapping)+get<0>(mapping)) {
@@ -328,11 +348,11 @@ namespace vpsim {
   */
   CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_noc_pos_by_address_with_interleave (uint64_t addr, size_t& index) {
     if(addr >= RamBaseAddr && addr < RamLastAddr){
-      index += ((addr-RamBaseAddr) / InterleaveLength) % mAddressIDs.size();
+      index += ((addr-RamBaseAddr) / MemoryInterleaveLength) % mAddressIDs.size();
       return get<2>(mAddressIDs[index]);
     }
     else
-      return get_noc_pos_by_address (addr,index);
+      return get_noc_pos_by_address_without_interleave (addr,index);
   }
 
   CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_noc_pos_by_id (idx_t id) {
@@ -353,12 +373,22 @@ namespace vpsim {
     throw runtime_error("Unknown Device ID: " + to_string(id));
   }
 
-  CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_home_pos_by_address (uint64_t addr) {
+  CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_home_pos_by_address_without_interleave (uint64_t addr) {
     for (auto& mapping: mHomeIDs)
       if (addr >= get<0>(mapping) && addr < get<1>(mapping)+get<0>(mapping)) {
         return get<2>(mapping);
       }
     throw runtime_error("Unknown Address: " + to_string(addr));
+  }
+
+  CoherenceInterconnect::mesh_pos CoherenceInterconnect::get_home_pos_by_address_with_interleave (uint64_t addr) {
+    size_t index=0;
+    if(addr >= RamBaseAddr && addr < RamLastAddr){
+      index = ((addr-RamBaseAddr) / SLCInterleaveLength) % mHomeIDs.size();
+    }
+    else
+      throw runtime_error("Unknown Address: " + to_string(addr));
+    return get<2>(mHomeIDs[index]);
   }
 
   inline void CoherenceInterconnect::computeNoCPerformance (uint64_t distance, sc_time latency) {
@@ -379,12 +409,12 @@ namespace vpsim {
       // If target is memory-mapped, i.e. main memory or LLC, its mesh position is computed using its address map
       if(!isHome){
         size_t index = 0;
-        dst_pos = get_noc_pos_by_address(addr, index);
+        dst_pos = (this->*get_noc_pos_by_address)(addr, index);
         dst_x = dst_pos.x_id;
         dst_y = dst_pos.y_id;
         dist  = abs((int64_t)src_x-dst_x) + abs((int64_t)src_y-dst_y)+1;
       } else {
-        dst_pos = get_home_pos_by_address(addr);
+        dst_pos = (this->*get_home_pos_by_address)(addr); 
         dst_x = dst_pos.x_id;
         dst_y = dst_pos.y_id;
         dist  = abs((int64_t)src_x-dst_x) + abs((int64_t)src_y-dst_y)+1;
@@ -695,8 +725,7 @@ namespace vpsim {
     if (!isIdMapped) {
       if(!isHome){
         size_t index = IndexFirstMemoryController;
-        if(!InterleaveLength)   dst_pos = get_noc_pos_by_address(trans.get_address(), index);
-        else                    dst_pos = get_noc_pos_by_address_with_interleave(trans.get_address(), index);
+        dst_pos = (this->*get_noc_pos_by_address)(trans.get_address(), index);
         dest.push_back(dst_pos);
         //Update Memory Controllers Counters
         if(trans.get_command()==tlm::TLM_READ_COMMAND)
@@ -705,7 +734,7 @@ namespace vpsim {
           mWriteCount[index]+=trans.get_data_length();
         return dest;
       } else {
-        dst_pos = get_home_pos_by_address(trans.get_address());
+        dst_pos = (this->*get_home_pos_by_address)(trans.get_address());
         dest.push_back(dst_pos);
         return dest;
       }
@@ -732,9 +761,7 @@ namespace vpsim {
     if(device && trans.get_command()==tlm::TLM_READ_COMMAND){ //Reverse direction: memory -> device
       dest.push_back(src_pos);
       size_t index = IndexFirstMemoryController; //index of the first memory controller
-      mesh_pos src_pos;
-      if(!InterleaveLength)   src_pos = get_noc_pos_by_address(trans.get_address(), index);
-      else                    src_pos = get_noc_pos_by_address_with_interleave(trans.get_address(), index);
+      src_pos = (this->*get_noc_pos_by_address)(trans.get_address(), index);
     }
     else{
       dest=GetDestinations(trans, isHome, isIdMapped, dst_ids);

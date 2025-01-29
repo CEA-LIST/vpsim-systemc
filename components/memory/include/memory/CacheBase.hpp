@@ -113,6 +113,7 @@ namespace vpsim{
     // the address to a Bytes is of size [AddressBits] that can be decomposed in several fields [TagBits|IndexBits|OffsetBits]
     uint64_t AddressBits;                                     //!< number of bits composing a data address in the cache
     uint64_t OffsetBits;                                      //!< number of bits necessary to address a specific byte within a given CacheLine
+    uint64_t InterleaveBits;
     uint64_t IndexBits;                                       //!< number of bits necessary to address a specific cache set
     uint64_t TagBits;                                         //!< number of bits to be stored as tags to uniquely identify a CacheLine from within a set
     //address masks
@@ -150,6 +151,7 @@ namespace vpsim{
     bool IsHome = false;
 
     uint64_t Associativity;
+    uint64_t NbInterleavedCaches;
     CacheReplacementPolicy ReplPolicy;
     CacheWritePolicy WritePolicy;
     CacheAllocPolicy AllocPolicy;
@@ -176,6 +178,7 @@ namespace vpsim{
               uint64_t               cacheSize,
               uint64_t               cacheLineSize,
               uint64_t               associativity,
+              uint64_t               nbInterleavedCaches,
               CacheReplacementPolicy replPolicy = LRU,
               CacheWritePolicy writePolicy = WBack,
               CacheAllocPolicy allocPolicy = WAllocate,
@@ -195,6 +198,7 @@ namespace vpsim{
     , Level             (level)
     , IsHome (isHome)
     , Associativity     (associativity)
+    , NbInterleavedCaches (nbInterleavedCaches)
     , ReplPolicy        (replPolicy)
     , WritePolicy       (writePolicy)
     , AllocPolicy       (allocPolicy)
@@ -213,15 +217,16 @@ namespace vpsim{
       // the address to a Bytes is of size [AddressBits] that can be decomposed in several fields [TagBits|IndexBits|OffsetBits]
       AddressBits = sizeof(AddressType) * 8;              //!< number of bits composing a data address in the cache
       OffsetBits  = (log2 (CacheLineSize));               //!< number of bits necessary to address a specific byte within a given CacheLine
+      InterleaveBits  = NbInterleavedCaches > 0 ? log2 (NbInterleavedCaches): 0;
       IndexBits   = (log2 (NbSets));                      //!< number of bits necessary to address a specific cache set
-      TagBits     = AddressBits - IndexBits - OffsetBits; //!< number of bits that are to be stored as tags to uniquely identify a CacheLine from within a set
+      TagBits     = AddressBits - IndexBits - InterleaveBits - OffsetBits; //!< number of bits that are to be stored as tags to uniquely identify a CacheLine from within a set
       //address masks
       OffsetMask  = (1ULL<<OffsetBits)-1;                 //!< mask for the least-significant OffsetBits bits in a full AddressType
       IndexMask   = (1ULL<<IndexBits)-1;                  //!< mask for the least-significant IndexBits bits in a full AddressType
       TagMask     = (1ULL<<TagBits)-1;                    //!< mask for the least-significant TagBits bits in a full AddressType
       //address Shifts
-      IndexShift = OffsetBits;                            //!< offset of the Index bits in the AddressType
-      TagShift = IndexBits+OffsetBits;                    //!< offset of the tag bits in the AddressType
+      IndexShift = OffsetBits + InterleaveBits;           //!< offset of the Index bits in the AddressType
+      TagShift = IndexBits + OffsetBits + InterleaveBits; //!< offset of the tag bits in the AddressType
 
       assert (ReplPolicy == LRU || !WCETMode);
       CacheLines.resize(NbSets);

@@ -51,6 +51,7 @@ public:
         unsigned CacheSize,
         unsigned CacheLineSize,
         unsigned Associativity,
+        unsigned NbInterleavedCaches,
         CacheReplacementPolicy ReplPolicy = LRU,
         CacheWritePolicy writePolicy = WBack,
         CacheAllocPolicy allocPolicy = WAllocate,
@@ -64,7 +65,7 @@ public:
         bool isHome = false,
         bool isCoherent = false):
     CacheBase<AddressType, WordType, WCETMode>
-  (name, CacheSize, CacheLineSize, Associativity, ReplPolicy, writePolicy, allocPolicy,
+  (name, CacheSize, CacheLineSize, Associativity, NbInterleavedCaches, ReplPolicy, writePolicy, allocPolicy,
    dataSupport, level, inclusionOfHigher, inclusionOfLower, isHome, isCoherent, id)
     , DmiKeeper (1)
     , DataSupport (dataSupport)

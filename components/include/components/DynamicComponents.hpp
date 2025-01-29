@@ -1154,6 +1154,7 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
       registerRequiredAttribute("size");
       registerRequiredAttribute("line_size");
       registerRequiredAttribute("associativity");
+	  registerOptionalAttribute("nb_interleaved_caches","0");
       registerRequiredAttribute("repl_policy");
       registerRequiredAttribute("writing_policy");
       registerRequiredAttribute("allocation_policy");
@@ -1238,6 +1239,7 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
                              getAttrAsUInt64("size"),
                              getAttrAsUInt64("line_size"),
                              getAttrAsUInt64("associativity"),
+							 getAttrAsUInt64("nb_interleaved_caches"),
                              repl,
                              writePol,
                              allocPol,
@@ -1410,7 +1412,8 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
 	   registerRequiredAttribute("flitSize");
 	   registerRequiredAttribute("memory_word_length"),
        registerRequiredAttribute("is_coherent");
-	   registerRequiredAttribute("interleave_length");
+	   registerOptionalAttribute("memory_interleave_length","0");
+	   registerOptionalAttribute("slc_interleave_length","0");
        registerOptionalAttribute("latency_enable", "1");
        registerRequiredAttribute("is_mesh");
        registerRequiredAttribute("mesh_x");
@@ -1656,7 +1659,8 @@ struct DynamicCache : public VpsimIp<InPortType, OutPortType> {
 					 getAttrAsUInt64("flitSize"),
 					 getAttrAsUInt64("memory_word_length"),
                      getAttrAsUInt64("is_coherent"),
-					 getAttrAsUInt64("interleave_length"));
+					 getAttrAsUInt64("memory_interleave_length"),
+					 getAttrAsUInt64("slc_interleave_length"));
 	   setDelayStatCapture(true);
        if (!getAttrAsUInt64("is_mesh")) {
          mModulePtr->set_is_mesh(false);

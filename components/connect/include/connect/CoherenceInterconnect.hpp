@@ -74,15 +74,6 @@ namespace vpsim {
     vector<uint64_t> HomeCoherentCountOut;
     vector<uint64_t> TotalCoherentCountOut;
 
-    uint32_t         InterleaveLength; //0 to disable interleaving
-    uint64_t         RamBaseAddr;    //RAM base address used for interleaving
-    uint64_t         RamLastAddr;    //RAM Last address (not included) used for interleaving
-    uint32_t         IndexFirstMemoryController;
-
-    uint32_t         MWordLengthInByte;      //Memory Word Length In Byte
-
-    uint32_t         FlitSize;
-
     /**
      * NoC performance counters
     */
@@ -104,7 +95,14 @@ namespace vpsim {
     uint32_t HomeCount    = 0;
     uint32_t MMappedCount = 0;
 
+    uint32_t         FlitSize;
+    uint32_t         MWordLengthInByte;      //Memory Word Length In Byte
     bool IsCoherent;
+    uint32_t         MemoryInterleaveLength; //0 to disable memory interleaving
+    uint32_t         SLCInterleaveLength; //0 to disable SLC interleaving
+    uint64_t         RamBaseAddr;    //RAM base address used for interleaving
+    uint64_t         RamLastAddr;    //RAM Last address (not included) used for interleaving
+    uint32_t         IndexFirstMemoryController;
 
     using SimpleInSocket  = tlm_utils::simple_target_socket<CoherenceInterconnect>;
     using SimpleOutSocket = tlm_utils::simple_initiator_socket<CoherenceInterconnect>;
@@ -199,7 +197,7 @@ namespace vpsim {
     inline uint64_t getReadCount (size_t index) {return mReadCount[index]; }
     inline uint64_t getWriteCount(size_t index) {return mWriteCount[index];}
 
-    CoherenceInterconnect (sc_module_name name, uint32_t nb_cache_in, uint32_t nb_cache_out, uint32_t nb_home_in, uint32_t nb_home_out, uint32_t nb_mmapped, uint32_t num_device, uint32_t flitSize, uint32_t wordLengthInByte, bool isCoherent, uint32_t interleaveLength);
+    CoherenceInterconnect (sc_module_name name, uint32_t nb_cache_in, uint32_t nb_cache_out, uint32_t nb_home_in, uint32_t nb_home_out, uint32_t nb_mmapped, uint32_t num_device, uint32_t flitSize, uint32_t wordLengthInByte, bool isCoherent, uint32_t memoryInterleaveLength, uint32_t slcInterleaveLength);
     ~CoherenceInterconnect ();
     SC_HAS_PROCESS (CoherenceInterconnect);
 
@@ -245,11 +243,14 @@ namespace vpsim {
     void set_ram_last_addr (uint64_t lastAddr);
     void set_memory_word_length (uint32_t wordLengthInByte);
     void set_first_memory_controller ();
-    mesh_pos get_noc_pos_by_address (uint64_t addr, size_t& index);
+    mesh_pos (CoherenceInterconnect::*get_noc_pos_by_address) (uint64_t addr, size_t& index);
+    mesh_pos get_noc_pos_by_address_without_interleave (uint64_t addr, size_t& index);
     mesh_pos get_noc_pos_by_address_with_interleave (uint64_t addr, size_t& index);
     mesh_pos get_noc_pos_by_id (idx_t id);
     mesh_pos get_device_noc_pos_by_id (idx_t id);
-    mesh_pos get_home_pos_by_address (uint64_t addr);
+    mesh_pos (CoherenceInterconnect::*get_home_pos_by_address) (uint64_t addr);
+    mesh_pos get_home_pos_by_address_without_interleave (uint64_t addr);
+    mesh_pos get_home_pos_by_address_with_interleave (uint64_t addr);
     uint64_t computeNoCLatency (bool isHome, bool isIdMapped, uint64_t addr, idx_t src_id, set<idx_t> dst_ids);
     void computeNoCPerformance (uint64_t distance, sc_time latency);
 
