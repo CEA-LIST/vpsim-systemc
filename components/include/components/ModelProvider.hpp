@@ -100,6 +100,7 @@ namespace vpsim {
             uint64_t data,
             unsigned size);
     typedef void (*SyncCb)(void* opaque, uint64_t executed, int wfi);
+    typedef void (*ShutdownCb)(void);
 
     typedef uint64_t (*ICacheMissCb)(void* opaque, uint64_t addr, unsigned size, int* tb_hit);
 
@@ -128,6 +129,7 @@ namespace vpsim {
     typedef void (*modelprovider_set_default_read_callback_t)(ReadCb cb);
     typedef void (*modelprovider_set_default_write_callback_t)(WriteCb cb);
     typedef void(* modelprovider_set_sync_callback_t)(SyncCb cb);
+    typedef void (*modelprovider_set_shutdown_callback_t)(ShutdownCb cb);
     typedef void (*modelprovider_declare_external_dev_t)(char* name, uint64_t base, uint64_t size);
     typedef void (*modelprovider_declare_external_ram_t)(char* name, uint64_t base, uint64_t size, void* data);
     typedef void* (*modelprovider_create_internal_cpu_t)(void *proxy, char* type, int index, uint64_t start_pc, int secure, int start_off);
@@ -174,6 +176,7 @@ namespace vpsim {
             LDFCT(modelprovider_set_default_read_callback, set_default_read_callback);
             LDFCT(modelprovider_set_default_write_callback, set_default_write_callback);
             LDFCT(modelprovider_set_sync_callback, set_sync_callback);
+            LDFCT(modelprovider_set_shutdown_callback, set_shutdown_callback);
             LDFCT(modelprovider_run_cpu, run_cpu);
             LDFCT(modelprovider_poll_io, poll_io);
             LDFCT(modelprovider_declare_external_dev, declare_external_dev);
@@ -307,6 +310,7 @@ namespace vpsim {
         modelprovider_set_default_read_callback_t set_default_read_callback;
         modelprovider_set_default_write_callback_t set_default_write_callback;
         modelprovider_set_sync_callback_t set_sync_callback;
+        modelprovider_set_shutdown_callback_t set_shutdown_callback;
         modelprovider_run_cpu_t run_cpu;
         modelprovider_poll_io_t poll_io;
 
@@ -400,6 +404,7 @@ namespace vpsim {
 
         ReadCb read_callback;
         WriteCb write_callback;
+        ShutdownCb shutdown_callback;
         void *internal_dev;
         uint64_t base_address;
         int irq;
@@ -553,6 +558,10 @@ namespace vpsim {
     void model_provider_sync(void* opaque, uint64_t executed, int wfi) {
         ModelProviderCpu* cpu = (ModelProviderCpu*) opaque;
         cpu->provider->sync(executed, wfi);
+    }
+
+    void model_provider_shutdown() {
+        sc_stop();
     }
 
    /* void model_provider_main_mem_cb(void* opaque,
@@ -977,6 +986,7 @@ namespace vpsim {
             mModulePtr->set_default_read_callback(model_provider_read_cb);
             mModulePtr->set_default_write_callback(model_provider_write_cb);
             mModulePtr->set_sync_callback(model_provider_sync);
+            mModulePtr->set_shutdown_callback(model_provider_shutdown);
             mModulePtr->modelprovider_unlock(model_provider_unlock_cb, (void*) mModulePtr);
             mModulePtr->modelprovider_wait_unlock(model_provider_wait_unlock_cb, (void*) mModulePtr);
             mModulePtr->modelprovider_register_fill_bias_cb(&ModelProvider::get_cpu_biases, mModulePtr->conversion_factor);
