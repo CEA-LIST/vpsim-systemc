@@ -356,18 +356,26 @@ public:
 		}
 		return false;
 	}
+	bool checkAddrRange(uint64_t phys) {
+		for (auto& t: mMaps) {
+			if (phys >= get<1>(t) && phys < get<1>(t)+get<2>(t)){
+				return true;
+			}
+		}
+		return false;
+	}
 
 
 	using portType=tlm_utils::simple_initiator_socket<SystemCCosimulator>;
 
 	virtual void insert(uint32_t cpu, uint8_t write, uint8_t fetch, void* phys, unsigned int size, uint64_t epoch, uint64_t time_stamp) override {
 		uint64_t addr=0;
-		if (! fetch && !convertAddr(phys,&addr)){
-			// std::cerr<<"Warning: Could not convert address "<<hex<<phys<<endl;
-			//throw 0;
-		} else if (fetch) {
-			addr=(uint64_t)phys;
+		if (!checkAddrRange((uint64_t)phys)){
+			fprintf(stderr, "[MemCosim] Warning : address %p not in range, insertion ignored !\n", phys);
+			return;
 		}
+		addr=(uint64_t)phys;
+
 		pld.set_data_ptr(NULL);
 		pld.set_address(addr);
 		pld.set_data_length(size);
